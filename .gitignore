@@ -1,0 +1,26 @@
+# Dependencias
+node_modules/
+
+# Build y cobertura
+dist/
+coverage/
+*.tsbuildinfo
+
+# Variables de entorno (solo se versiona .env.example)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Almacenamiento local de documentos generados
+storage/
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
