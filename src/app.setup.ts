@@ -16,7 +16,8 @@ export const API_DEFAULT_VERSION = '1';
 export function configureApp(app: NestExpressApplication): void {
   const config = app.get(AppConfigService);
 
-  if (config.get('TRUST_PROXY')) app.set('trust proxy', 1);
+  const proxyHops = config.get('TRUST_PROXY');
+  if (proxyHops > 0) app.set('trust proxy', proxyHops);
   app.disable('x-powered-by');
 
   app.use(helmet());

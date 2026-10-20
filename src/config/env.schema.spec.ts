@@ -12,6 +12,14 @@ describe('validateEnv', () => {
     expect(env.MONGODB_AUTO_INDEX).toBe(true);
   });
 
+  it('interpreta TRUST_PROXY como booleano o número de saltos', () => {
+    expect(validateEnv(base).TRUST_PROXY).toBe(0);
+    expect(validateEnv({ ...base, TRUST_PROXY: 'true' }).TRUST_PROXY).toBe(1);
+    expect(validateEnv({ ...base, TRUST_PROXY: 'false' }).TRUST_PROXY).toBe(0);
+    expect(validateEnv({ ...base, TRUST_PROXY: '2' }).TRUST_PROXY).toBe(2);
+    expect(() => validateEnv({ ...base, TRUST_PROXY: 'si' })).toThrow(/TRUST_PROXY/);
+  });
+
   it('exige MONGODB_URI con esquema válido', () => {
     expect(() => validateEnv({})).toThrow(/MONGODB_URI/);
     expect(() => validateEnv({ MONGODB_URI: 'http://x' })).toThrow(/mongodb:\/\//);

@@ -39,8 +39,14 @@ export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().min(1).max(65535).default(4000),
-    /** Detrás de un proxy inverso (Nginx, plataforma cloud) para leer la IP real. */
-    TRUST_PROXY: booleanFromString.default(false),
+    /**
+     * Detrás de un proxy inverso (Nginx, plataforma cloud) para leer la IP real.
+     * true = 1 salto; un número indica cuántos proxies hay delante (p. ej. 2 con Vercel → Render).
+     */
+    TRUST_PROXY: z
+      .union([booleanFromString, z.coerce.number().int().min(0).max(5)])
+      .transform((value) => (value === true ? 1 : value === false ? 0 : value))
+      .default(0),
 
     /** URL pública del frontend; se usa para enlaces en correos y PDFs. */
     PUBLIC_APP_URL: z.url().default('http://localhost:3000'),
