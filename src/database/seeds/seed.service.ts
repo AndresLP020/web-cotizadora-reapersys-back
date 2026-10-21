@@ -103,6 +103,11 @@ export class SeedService {
         { $set: { 'rental.monthToMonthSurchargeBp': monthToMonthSurchargeBp, 'rental.semiannualDiscountBp': semiannualDiscountBp, 'rental.annualDiscountBp': annualDiscountBp } },
       )
     ).modifiedCount;
+    // Bases sin ningún dato de contacto capturado: se cargan los de la empresa; lo editado en el panel se respeta.
+    await this.settings.updateOne(
+      { key: seedSettings.key, 'contact.email': missing, 'contact.whatsapp': missing, 'contact.instagram': missing, 'contact.tiktok': missing },
+      { $set: { contact: seedSettings.contact } },
+    );
 
     // Costos de operación de referencia (para la mensualidad sugerida)
     for (const [index, cost] of seedOperatingCosts.entries()) {

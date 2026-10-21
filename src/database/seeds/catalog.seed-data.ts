@@ -680,7 +680,13 @@ export const seedSettings = {
   rental: { minimumTermMonths: 12, financingBp: 0, monthToMonthSurchargeBp: 1_500, semiannualDiscountBp: 500, annualDiscountBp: 1_000 },
   // Garantía de referencia 90 días (brief §12), pendiente de confirmar.
   warranty: { referenceDays: 90, confirmed: false },
-  contact: {},
+  // Contacto confirmado por la empresa (2026-10-21). Facebook pendiente.
+  contact: {
+    email: 'tupuntodeventaixtlahuaca@gmail.com',
+    whatsapp: '527121537999',
+    instagram: 'https://www.instagram.com/reapersys',
+    tiktok: 'https://www.tiktok.com/@reapersys.punto.de.venta',
+  },
   // El aviso de privacidad se publica desde el panel una vez revisado y con los datos del responsable.
   privacyNotice: { published: false, publishedAt: null },
   commercialTerms: [
