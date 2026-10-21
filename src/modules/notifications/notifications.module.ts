@@ -10,7 +10,7 @@ import { BusinessSettings, BusinessSettingsSchema } from '../settings/schemas/bu
 import { Testimonial, TestimonialSchema } from '../testimonials/schemas/testimonial.schema';
 import { NotificationsService } from './notifications.service';
 import { NotificationsWorker } from './notifications.worker';
-import { ResendEmailProvider, SimulatedEmailProvider } from './providers/email.providers';
+import { ResendEmailProvider, SimulatedEmailProvider, SmtpEmailProvider } from './providers/email.providers';
 import { EMAIL_PROVIDER, WHATSAPP_PROVIDER } from './providers/provider.types';
 import { MetaCloudWhatsAppProvider, SimulatedWhatsAppProvider } from './providers/whatsapp.providers';
 import { NotificationDelivery, NotificationDeliverySchema } from './schemas/notification-delivery.schema';
@@ -39,10 +39,22 @@ import { WhatsAppWebhookController } from './whatsapp-webhook.controller';
     {
       provide: EMAIL_PROVIDER,
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) =>
-        config.get('EMAIL_PROVIDER') === 'resend'
-          ? new ResendEmailProvider(config.get('RESEND_API_KEY')!, config.get('EMAIL_FROM'))
-          : new SimulatedEmailProvider(),
+      useFactory: (config: AppConfigService) => {
+        switch (config.get('EMAIL_PROVIDER')) {
+          case 'resend':
+            return new ResendEmailProvider(config.get('RESEND_API_KEY')!, config.get('EMAIL_FROM'));
+          case 'smtp':
+            return new SmtpEmailProvider({
+              host: config.get('SMTP_HOST'),
+              port: config.get('SMTP_PORT'),
+              user: config.get('SMTP_USER')!,
+              password: config.get('SMTP_PASSWORD')!,
+              from: config.get('EMAIL_FROM'),
+            });
+          default:
+            return new SimulatedEmailProvider();
+        }
+      },
     },
     {
       provide: WHATSAPP_PROVIDER,

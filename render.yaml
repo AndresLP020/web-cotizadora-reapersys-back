@@ -33,12 +33,23 @@ services:
       # Orígenes permitidos (https), separados por coma; normalmente igual a PUBLIC_APP_URL.
       - key: CORS_ORIGINS
         sync: false
-      # "resend" (envía de verdad; exige RESEND_API_KEY) o "simulated" (registra sin enviar).
+      # "smtp" (Gmail con contraseña de aplicación), "resend" (exige RESEND_API_KEY)
+      # o "simulated" (registra sin enviar). SMTP requiere plan de pago: Render bloquea
+      # los puertos SMTP en el plan free.
       - key: EMAIL_PROVIDER
         sync: false
       - key: RESEND_API_KEY
         sync: false
-      # Remitente con el dominio verificado en Resend, p. ej. "ReaperSys <avisos@tudominio.com>".
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_USER
+        sync: false
+      # Contraseña de aplicación de Google (16 caracteres), no la contraseña de la cuenta.
+      - key: SMTP_PASSWORD
+        sync: false
+      # Remitente: con Gmail, la misma cuenta de SMTP_USER; con Resend, un dominio verificado.
       - key: EMAIL_FROM
         sync: false
       # Correo que recibe avisos internos y el resumen diario de cobranza.

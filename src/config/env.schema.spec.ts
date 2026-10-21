@@ -56,6 +56,7 @@ describe('validateEnv', () => {
 
   it('exige credenciales cuando un proveedor real está activo', () => {
     expect(() => validateEnv({ ...base, EMAIL_PROVIDER: 'resend' })).toThrow(/RESEND_API_KEY/);
+    expect(() => validateEnv({ ...base, EMAIL_PROVIDER: 'smtp', SMTP_USER: 'a@b.com' })).toThrow(/SMTP_PASSWORD/);
     expect(() => validateEnv({ ...base, WHATSAPP_PROVIDER: 'meta_cloud' })).toThrow(/WHATSAPP_ACCESS_TOKEN/);
   });
 

@@ -74,10 +74,15 @@ export const envSchema = z
     SWAGGER_ENABLED: booleanFromString.optional(),
 
     // --- Correo transaccional ---
-    EMAIL_PROVIDER: z.enum(['simulated', 'resend']).default('simulated'),
+    EMAIL_PROVIDER: z.enum(['simulated', 'resend', 'smtp']).default('simulated'),
     EMAIL_FROM: z.string().default('ReaperSys <cotizaciones@example.com>'),
     EMAIL_ADMIN_NOTIFY: optionalSecret,
     RESEND_API_KEY: optionalSecret,
+    // SMTP (p. ej. Gmail con contraseña de aplicación: smtp.gmail.com, 465).
+    SMTP_HOST: z.string().default('smtp.gmail.com'),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(465),
+    SMTP_USER: optionalSecret,
+    SMTP_PASSWORD: optionalSecret,
 
     // --- WhatsApp Business Platform (Cloud API) ---
     WHATSAPP_PROVIDER: z.enum(['simulated', 'meta_cloud']).default('simulated'),
@@ -148,6 +153,14 @@ export const envSchema = z
         path: ['RESEND_API_KEY'],
         message: 'RESEND_API_KEY es obligatoria cuando EMAIL_PROVIDER=resend.',
       });
+    }
+
+    if (env.EMAIL_PROVIDER === 'smtp') {
+      for (const key of ['SMTP_USER', 'SMTP_PASSWORD'] as const) {
+        if (!env[key]) {
+          ctx.addIssue({ code: 'custom', path: [key], message: `${key} es obligatoria cuando EMAIL_PROVIDER=smtp.` });
+        }
+      }
     }
 
     if (env.WHATSAPP_PROVIDER === 'meta_cloud') {
