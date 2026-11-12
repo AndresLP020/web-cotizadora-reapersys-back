@@ -194,6 +194,7 @@ export class CatalogAdminService {
           category: p.category,
           status: p.status,
           featured: p.featured,
+          tagline: p.tagline ?? '',
           hasDraft: draftSet.has(p._id.toString()),
           pendingVariants: price?.variantPrices.filter((v) => v.mode === 'pending').length ?? 0,
           pendingCredits: price?.removalCredits.filter((c) => c.mode === 'pending').length ?? 0,
@@ -233,6 +234,7 @@ export class CatalogAdminService {
       category: pkg.category,
       status: pkg.status,
       featured: pkg.featured,
+      tagline: pkg.tagline ?? '',
       comboPolicy: pkg.comboPolicy ?? null,
       variantGroups: pkg.variantGroups.map((g) => ({
         key: g.key,
@@ -334,7 +336,11 @@ export class CatalogAdminService {
     await this.audit.record({ action: 'package_price.draft_discarded', entityType: 'package', entityId: draft.package, actor: actorOf(user), before: { version: draft.version } });
   }
 
-  async updatePackage(user: AuthenticatedUser, id: string, patch: { status?: LifecycleStatus; featured?: boolean; rentalProfile?: RentalProfilePatch }) {
+  async updatePackage(
+    user: AuthenticatedUser,
+    id: string,
+    patch: { status?: LifecycleStatus; featured?: boolean; tagline?: string; rentalProfile?: RentalProfilePatch },
+  ) {
     const pkg = await this.findPackage(id);
     const before: Record<string, unknown> = {};
     const after: Record<string, unknown> = {};
@@ -342,6 +348,10 @@ export class CatalogAdminService {
       if (patch[key] === undefined || patch[key] === pkg[key]) continue;
       before[key] = pkg[key];
       after[key] = patch[key];
+    }
+    if (patch.tagline !== undefined && patch.tagline !== (pkg.tagline ?? '')) {
+      before.tagline = pkg.tagline ?? null;
+      after.tagline = patch.tagline;
     }
     if (patch.rentalProfile) {
       const r = patch.rentalProfile;

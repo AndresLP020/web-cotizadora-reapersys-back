@@ -880,3 +880,17 @@ export const seedSettings = {
     'Los costos de terceros (licencias, comisiones de pasarelas) dependen de cada proveedor.',
   ],
 };
+
+/**
+ * Promesa de una línea de cada paquete (tarjetas de /paquetes). Solo se carga en paquetes que aún
+ * no la tienen: lo editado en el panel se respeta.
+ */
+export const seedPackageTaglines: Record<string, string> = {
+  'landing-page': 'Presencia profesional rápida, lista para recibir clientes por WhatsApp.',
+  'web-corporativa': 'Sitio completo de empresa, posicionado y con captación de contactos.',
+  'tienda-virtual': 'Vende en línea desde el día uno, con pedidos ordenados y cobro verificable.',
+  'punto-de-venta': 'Opera la caja desde el primer día, con varios cajeros y corte diario.',
+  'software-personalizado': 'Un sistema hecho para tu proceso, con alcance claro y entregables.',
+  'aun-no-estoy-seguro': 'Cuéntanos qué necesitas y un asesor te recomienda la mejor opción.',
+  'solucion-combinada': 'Vende en línea y en mostrador con un solo catálogo e inventario.',
+};

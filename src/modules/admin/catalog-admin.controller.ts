@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -126,6 +126,8 @@ class RentalProfileDto {
 
 class UpdatePackageDto {
   @IsOptional() @IsIn(LIFECYCLE_STATUSES) status?: LifecycleStatus;
+  /** Promesa de una línea de la tarjeta. Vacío la quita. */
+  @IsOptional() @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MaxLength(140) tagline?: string;
   @IsOptional() @IsBoolean() featured?: boolean;
   @IsOptional() @ValidateNested() @Type(() => RentalProfileDto) rentalProfile?: RentalProfileDto;
 }

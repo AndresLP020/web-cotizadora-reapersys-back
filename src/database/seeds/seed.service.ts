@@ -31,6 +31,7 @@ import {
   seedOperatingCosts,
   seedPackages,
   seedRules,
+  seedPackageTaglines,
   seedSettings,
 } from './catalog.seed-data';
 
@@ -57,6 +58,8 @@ export interface SeedReport {
   digitalTemplates: number;
   nfcDesigns: number;
   nfcPriceTiers: number;
+  /** Paquetes a los que se cargó su promesa de una línea (solo si no tenían). */
+  packageTaglines: number;
 }
 
 /** Servicios que «Hosting» y «Dominio» anuales reemplazan. */
@@ -121,6 +124,7 @@ export class SeedService {
       digitalTemplates: 0,
       nfcDesigns: 0,
       nfcPriceTiers: 0,
+      packageTaglines: 0,
     };
     const missing = trusted({ $exists: false });
 
@@ -327,6 +331,11 @@ export class SeedService {
 
     if (upgradeInfrastructure) report.infrastructureUpgrade = await this.upgradeInfrastructure(componentId);
     report.catalogSync = await this.syncCatalog(packageContent, componentId);
+
+    // Promesa de una línea de cada paquete: solo donde no existe (lo editado en el panel se respeta).
+    for (const [slug, tagline] of Object.entries(seedPackageTaglines)) {
+      report.packageTaglines += (await this.packages.updateOne({ slug, tagline: missing }, { $set: { tagline } })).modifiedCount;
+    }
 
     // Catálogo digital: solo se crea lo que falta; nada queda publicado (no tienen demo).
     for (const [index, occasion] of seedOccasions.entries()) {

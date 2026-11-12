@@ -61,6 +61,8 @@ export interface PublicPackage {
   name: string;
   category: PackageCategory;
   summary: string;
+  /** Promesa de una línea; null si no se ha capturado. */
+  tagline: string | null;
   pricing: PublicPricing;
   features: string[];
   variants: PublicPackageVariant[];

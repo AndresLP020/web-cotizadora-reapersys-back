@@ -181,6 +181,10 @@ export class Package {
   @Prop({ required: true, trim: true, maxlength: 400 })
   summary!: string;
 
+  /** Promesa de una línea para la tarjeta del paquete (editable en el panel). */
+  @Prop({ trim: true, maxlength: 140 })
+  tagline?: string;
+
   /** Características comerciales mostradas al cliente. */
   @Prop({ type: [String], default: [] })
   features!: string[];

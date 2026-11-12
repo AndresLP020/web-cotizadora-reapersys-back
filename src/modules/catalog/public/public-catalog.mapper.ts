@@ -184,6 +184,7 @@ export function toPublicPackage(pkg: Doc<Package>, ctx: PackageMappingContext): 
     name: pkg.name,
     category: pkg.category,
     summary: pkg.summary,
+    tagline: pkg.tagline || null,
     pricing: packagePricing(pkg, ctx.price),
     features: [...pkg.features],
     variants: pkg.variantGroups.flatMap((group) =>
