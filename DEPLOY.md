@@ -15,13 +15,13 @@
 | Variable | Valor |
 | --- | --- |
 | `MONGODB_URI` | URL de Atlas del paso 1 |
-| `PUBLIC_APP_URL` | URL del frontend, p. ej. `https://web-cotizadora-reapersys.vercel.app` (sin `/` final) |
-| `CORS_ORIGINS` | La misma URL (varias separadas por coma, siempre `https://`) |
 | `EMAIL_PROVIDER` | `resend` para enviar correos reales, `simulated` mientras no tengas Resend |
 | `RESEND_API_KEY` | Clave de Resend (obligatoria con `resend`) |
 | `EMAIL_FROM` | Remitente con dominio verificado en Resend, p. ej. `ReaperSys <avisos@tudominio.com>` |
 | `EMAIL_ADMIN_NOTIFY` | Tu correo: avisos internos y resumen diario de cobranza |
 
+`PUBLIC_APP_URL` y `CORS_ORIGINS` ya vienen en `render.yaml` con `https://web-cotizadora-reapersys-front.vercel.app`;
+si usas un dominio propio, cámbialas en Render (varios orígenes separados por coma, siempre `https://`).
 `SESSION_SECRET` lo genera Render automáticamente. `TRUST_PROXY=2` ya viene configurado (proxy de Vercel + balanceador de Render).
 
 3. Al terminar, comprueba `https://<tu-servicio>.onrender.com/api/v1/health`.
@@ -53,7 +53,23 @@ unset MONGODB_URI
 - `db:indexes` crea los índices (la API no los crea sola en producción). Repítelo si una versión nueva agrega índices.
 - `seed` carga el catálogo inicial; es idempotente y no sobrescribe datos existentes.
 
-## 4. Correo (Resend)
+### Copiar el catálogo que editaste en local (opcional)
+
+Si ajustaste precios, paquetes, testimonios o plantillas en tu base local, cópialos a Atlas en lugar de usar `seed`
+(requiere el contenedor local encendido: `docker start reapersys-mongo`):
+
+```bash
+ATLAS_URI='mongodb+srv://usuario:contraseña@cluster.xxxx.mongodb.net/' sh scripts/migrate-to-atlas.sh
+```
+
+Copia solo configuración y catálogo (incluidas las plantillas digitales y sus imágenes); nunca clientes, cotizaciones ni usuarios.
+
+## 4. Frontend en Vercel
+
+Con la API arriba, en Vercel → **Settings → Environment Variables** pon `API_PROXY_TARGET=https://<tu-servicio>.onrender.com`
+y `API_INTERNAL_URL=https://<tu-servicio>.onrender.com/api/v1`, y redepliega (ver `DEPLOY.md` del frontend).
+
+## 5. Correo (Resend)
 
 1. Cuenta en https://resend.com → **Domains** → agrega tu dominio y crea los registros DNS que indica.
 2. **API Keys** → crea una clave y ponla en `RESEND_API_KEY`; cambia `EMAIL_PROVIDER` a `resend`.

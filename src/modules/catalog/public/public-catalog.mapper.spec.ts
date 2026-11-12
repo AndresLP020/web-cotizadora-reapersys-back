@@ -2,7 +2,16 @@ import { Types } from 'mongoose';
 import type { PackagePrice } from '../../pricing/schemas/package-price.schema';
 import type { Component } from '../schemas/component.schema';
 import type { Package } from '../schemas/package.schema';
-import { componentPricing, packagePricing, toPublicComponent, toPublicPackage, variantOptionPricing } from './public-catalog.mapper';
+import {
+  componentPricing,
+  effectiveItems,
+  includedValueCents,
+  offerableAddOns,
+  packagePricing,
+  toPublicComponent,
+  toPublicPackage,
+  variantOptionPricing,
+} from './public-catalog.mapper';
 
 const posIntegral = {
   pricingType: 'fixed',
@@ -125,5 +134,59 @@ describe('public catalog mapper', () => {
 
     const result = toPublicPackage(combo, { price: undefined, packagesById: new Map([[webId.toString(), web]]) });
     expect(result.includesPackages).toEqual([{ slug: 'web-business', name: 'Web Business' }]);
+  });
+
+  describe('contenido del paquete', () => {
+    const training = new Types.ObjectId();
+    const cart = new Types.ObjectId();
+    const section = new Types.ObjectId();
+    const store = { _id: new Types.ObjectId(), items: [{ component: training, quantity: 1, removable: false }, { component: cart, quantity: 1, removable: false }], variantGroups: [], includesPackages: [] };
+    const pos = { _id: new Types.ObjectId(), items: [{ component: training, quantity: 1, removable: false }], variantGroups: [], includesPackages: [] };
+    const combo = {
+      _id: new Types.ObjectId(),
+      items: [{ component: training, quantity: 1, removable: false }],
+      variantGroups: [],
+      includesPackages: [
+        { package: store._id, variants: {} },
+        { package: pos._id, variants: {} },
+      ],
+    };
+    const packagesById = new Map([store, pos].map((p) => [p._id.toString(), p as unknown as Package & { _id: Types.ObjectId }]));
+
+    it('en un combo, la cantidad de sus items propios reemplaza la de los paquetes contenidos', () => {
+      const items = effectiveItems(combo as unknown as Package & { _id: Types.ObjectId }, packagesById);
+      expect(items.get(training.toString())?.quantity).toBe(1);
+      expect(items.get(cart.toString())?.quantity).toBe(1);
+    });
+
+    it('«Puedes agregar» quita lo incluido y lo equivalente, salvo cuantificables', () => {
+      const addOns = [
+        { slug: 'web-section', maxQuantity: 30 },
+        { slug: 'contact-form', maxQuantity: 1 },
+        { slug: 'basic-seo-tags', maxQuantity: 1 },
+        { slug: 'managed-blog', maxQuantity: 1 },
+      ];
+      const result = offerableAddOns(addOns, new Set(['web-section', 'contact-form']), new Set(['basic-seo-tags']));
+      expect(result.map((a) => a.slug)).toEqual(['web-section', 'managed-blog']);
+    });
+
+    it('el valor incluido suma solo lo que se vende aparte con precio fijo', () => {
+      const items = [
+        { componentId: section.toString(), quantity: 4, removable: false },
+        { componentId: cart.toString(), quantity: 1, removable: false },
+        { componentId: training.toString(), quantity: 1, removable: false },
+      ];
+      const componentsById = new Map([
+        [section.toString(), { publicVisible: true, status: 'active' as const }],
+        [cart.toString(), { publicVisible: false, status: 'active' as const }],
+        [training.toString(), { publicVisible: true, status: 'active' as const }],
+      ]);
+      const prices = new Map([
+        [section.toString(), { mode: 'fixed' as const, saleCents: 45_000 }],
+        [cart.toString(), { mode: 'fixed' as const, saleCents: 99_900 }],
+        [training.toString(), { mode: 'pending' as const, saleCents: null }],
+      ]);
+      expect(includedValueCents(items, componentsById, prices)).toBe(180_000);
+    });
   });
 });

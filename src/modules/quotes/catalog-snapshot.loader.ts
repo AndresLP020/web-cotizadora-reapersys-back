@@ -53,6 +53,7 @@ export class CatalogSnapshotLoader {
         taxable: c.taxable,
         maxQuantity: c.maxQuantity,
         exclusiveGroup: c.exclusiveGroup,
+        includedLabel: c.includedLabel,
         price: price ? { priceId: price._id.toString(), version: price.version, mode: price.mode, saleCents: price.saleCents } : null,
       });
     }
@@ -87,6 +88,7 @@ export class CatalogSnapshotLoader {
         }),
         recommendedRecurringIds: (p.recommendedRecurring ?? []).map((id) => id.toString()),
         addOnIds: (p.addOns ?? []).map((id) => id.toString()),
+        equivalentIds: (p.equivalents ?? []).map((id) => id.toString()),
         comboPolicy: p.comboPolicy ? { onEssentialRemoval: p.comboPolicy.onEssentialRemoval, onVariantChange: p.comboPolicy.onVariantChange } : undefined,
         price: price
           ? {

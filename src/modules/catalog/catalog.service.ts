@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import type { Model, Types } from 'mongoose';
+import { type Model, Types } from 'mongoose';
 import { inValues } from '../../database/query-operators';
 import { PricingService } from '../pricing/pricing.service';
 import type { PackageCategory } from './catalog.constants';
 import {
+  effectiveItems,
+  includedValueCents,
   toPublicCategory,
   toPublicComponent,
   toPublicIndustry,
@@ -48,9 +50,24 @@ export class CatalogService {
       this.pricing.getPublishedPackagePrices(packages.map((p) => p._id)),
       this.loadIncludedPackages(packages),
     ]);
+    // Valor informativo de lo incluido: precios publicados de los componentes que también se venden aparte.
+    const itemsByPackage = new Map(packages.map((pkg) => [pkg._id.toString(), effectiveItems(pkg, packagesById)]));
+    const componentIds = [...new Set([...itemsByPackage.values()].flatMap((items) => [...items.keys()]))].map((id) => new Types.ObjectId(id));
+    const [components, componentPrices] = await Promise.all([
+      this.components.find({ _id: inValues(componentIds) }, { publicVisible: 1, status: 1 }).lean<Doc<Pick<Component, 'publicVisible' | 'status'>>[]>(),
+      this.pricing.getPublishedComponentPrices(componentIds),
+    ]);
+    const componentsById = new Map(components.map((c) => [c._id.toString(), c]));
 
     return {
-      items: packages.map((pkg) => toPublicPackage(pkg, { price: prices.get(pkg._id.toString()), packagesById })),
+      items: packages.map((pkg) => {
+        const items = itemsByPackage.get(pkg._id.toString())!.values();
+        return toPublicPackage(pkg, {
+          price: prices.get(pkg._id.toString()),
+          packagesById,
+          includedValueCents: includedValueCents(items, componentsById, componentPrices),
+        });
+      }),
     };
   }
 
@@ -58,26 +75,33 @@ export class CatalogService {
     const pkg = await this.packages.findOne({ slug, status: 'active' }).lean<Doc<Package>>();
     if (!pkg) throw new NotFoundException('Paquete no encontrado.');
 
+    const packagesById = await this.loadIncludedPackages([pkg]);
+    const included = effectiveItems(pkg, packagesById);
     const componentIds = [
-      ...pkg.items.map((item) => item.component),
-      ...pkg.variantGroups.flatMap((group) => group.options.flatMap((option) => option.items.map((item) => item.component))),
+      ...[...packagesById.values(), pkg].flatMap((p) => [
+        ...p.items.map((item) => item.component),
+        ...p.variantGroups.flatMap((group) => group.options.flatMap((option) => option.items.map((item) => item.component))),
+      ]),
+      ...(pkg.equivalents ?? []),
       ...(pkg.rentalProfile?.services ?? []),
       ...(pkg.rentalProfile?.coveredComponents ?? []),
     ];
-    const [prices, packagesById, components, recommendedRecurring, addOns] = await Promise.all([
+    const [prices, components, componentPrices, recommendedRecurring, addOns] = await Promise.all([
       this.pricing.getPublishedPackagePrices([pkg._id]),
-      this.loadIncludedPackages([pkg]),
       this.components.find({ _id: inValues(componentIds) }).lean<Doc<Component>[]>(),
+      this.pricing.getPublishedComponentPrices([...included.keys()].map((id) => new Types.ObjectId(id))),
       this.loadPublicComponents({ _id: inValues(pkg.recommendedRecurring), status: 'active' }),
       this.loadAddOns(pkg.addOns ?? []),
     ]);
+    const componentsById = new Map(components.map((c) => [c._id.toString(), c]));
 
     return toPublicPackageDetail(pkg, {
       price: prices.get(pkg._id.toString()),
       packagesById,
-      componentsById: new Map(components.map((c) => [c._id.toString(), c])),
+      componentsById,
       recommendedRecurring,
       addOns,
+      includedValueCents: includedValueCents(included.values(), componentsById, componentPrices),
     });
   }
 

@@ -44,8 +44,8 @@ describe('motor de cotización', () => {
       expect(result.totals.hasPendingAmounts).toBe(true);
     });
 
-    it('Landing Page conserva su alcance: subtotal, anticipo y mantenimiento', () => {
-      const result = calculateQuote(catalog, select({ packageSlug: 'landing-page' }));
+    it('Landing Page conserva su alcance: subtotal, anticipo y mantenimiento elegido', () => {
+      const result = calculateQuote(catalog, select({ packageSlug: 'landing-page', recurring: ['maintenance-web-basic'] }));
       expect(result.status).toBe('priced');
       expect(result.totals).toMatchObject({ subtotalCents: 349_900, totalCents: 349_900, depositCents: 174_950, balanceCents: 174_950, recurringMonthlyCents: 39_900 });
       expect(result.includedItems).toContainEqual(expect.objectContaining({ componentSlug: 'web-section', quantity: 4, removed: false }));
@@ -108,10 +108,40 @@ describe('motor de cotización', () => {
       );
     });
 
-    it('pedir algo incluido no genera ningún cargo', () => {
-      const result = calculateQuote(catalog, select({ packageSlug: 'punto-de-venta', components: [{ slug: 'pos-tickets', quantity: 1 }] }));
-      expect(result.lines.filter((l) => l.kind === 'addon')).toHaveLength(0);
-      expect(result.totals.subtotalCents).toBe(1_800_000);
+    it('rechaza agregar como adicional algo que el paquete ya incluye', () => {
+      expect(() => calculateQuote(catalog, select({ packageSlug: 'punto-de-venta', components: [{ slug: 'pos-tickets', quantity: 1 }] }))).toThrow(
+        'ya está incluido en Punto de Venta',
+      );
+      expect(() => calculateQuote(catalog, select({ packageSlug: 'punto-de-venta', components: [{ slug: 'pos-returns', quantity: 1 }] }))).toThrow(
+        'ya está incluido',
+      );
+    });
+
+    it('rechaza agregar lo que el paquete ya cubre (equivalentes)', () => {
+      expect(() =>
+        calculateQuote(catalog, select({ packageSlug: 'web-corporativa', components: [{ slug: 'basic-seo-tags', quantity: 1 }] })),
+      ).toThrow('ya está cubierto por Web Corporativa');
+      expect(() =>
+        calculateQuote(catalog, select({ packageSlug: 'software-personalizado', components: [{ slug: 'custom-software', quantity: 1 }] })),
+      ).toThrow('ya está cubierto por Software Personalizado');
+    });
+
+    it('rechaza agregar a la vez algo retirado', () => {
+      const removable = seedSnapshot({
+        mutatePackage: (pkg) => {
+          if (pkg.slug !== 'landing-page') return;
+          pkg.items = pkg.items.map((i) => (i.componentId === 'web-section' ? { ...i, removable: true } : i));
+        },
+      });
+      expect(() =>
+        calculateQuote(removable, select({ packageSlug: 'landing-page', removedComponents: ['web-section'], components: [{ slug: 'web-section', quantity: 5 }] })),
+      ).toThrow('fue retirado');
+    });
+
+    it('«Aún no estoy seguro» no acepta adicionales', () => {
+      expect(() =>
+        calculateQuote(catalog, select({ packageSlug: 'aun-no-estoy-seguro', components: [{ slug: 'custom-software', quantity: 1 }] })),
+      ).toThrow('no se ofrece con Aún no estoy seguro');
     });
 
     it('un adicional sin precio aprobado se muestra «Por cotizar»: sin importe inventado y a revisión', () => {
@@ -125,19 +155,23 @@ describe('motor de cotización', () => {
 
     it('con precio aprobado desde Administración, el adicional se cobra', () => {
       const approved = seedSnapshot();
-      const component = approved.componentsBySlug.get('pos-returns')!;
-      component.price = { priceId: 'price-pos-returns', version: 2, mode: 'fixed', saleCents: 120_000 };
-      const result = calculateQuote(approved, select({ packageSlug: 'punto-de-venta', components: [{ slug: 'pos-returns', quantity: 1 }] }));
+      const component = approved.componentsBySlug.get('pos-credit-sales')!;
+      component.price = { priceId: 'price-pos-credit-sales', version: 2, mode: 'fixed', saleCents: 120_000 };
+      const result = calculateQuote(approved, select({ packageSlug: 'punto-de-venta', components: [{ slug: 'pos-credit-sales', quantity: 1 }] }));
       expect(result.status).toBe('priced');
       expect(result.totals.subtotalCents).toBe(1_800_000 + 120_000);
     });
 
     it('solo acepta los adicionales documentados para el paquete', () => {
-      expect(() => calculateQuote(catalog, select({ packageSlug: 'tienda-virtual', components: [{ slug: 'wishlist', quantity: 1 }] }))).toThrow(
+      expect(() => calculateQuote(catalog, select({ packageSlug: 'tienda-virtual', components: [{ slug: 'pos-reports', quantity: 1 }] }))).toThrow(
         'no se ofrece con Tienda Virtual',
       );
-      expect(() => calculateQuote(catalog, select({ packageSlug: 'tienda-virtual', components: [{ slug: 'chatbot', quantity: 1 }] }))).toThrow(
+      expect(() => calculateQuote(catalog, select({ packageSlug: 'tienda-virtual', components: [{ slug: 'managed-blog', quantity: 1 }] }))).toThrow(
         QuoteSelectionError,
+      );
+      // La Landing Page no ofrece páginas internas ni blog: para eso está la Web Corporativa.
+      expect(() => calculateQuote(catalog, select({ packageSlug: 'landing-page', components: [{ slug: 'web-internal-page', quantity: 1 }] }))).toThrow(
+        'no se ofrece con Landing Page',
       );
       expect(() => calculateQuote(catalog, select({ packageSlug: 'punto-de-venta', components: [{ slug: 'stripe-payments', quantity: 1 }] }))).toThrow(
         'no se ofrece con Punto de Venta',
@@ -161,24 +195,28 @@ describe('motor de cotización', () => {
         select({
           packageSlug: 'web-corporativa',
           components: [
-            { slug: 'email-button', quantity: 1 },
-            { slug: 'seo-initial', quantity: 1 },
+            { slug: 'whatsapp-widget', quantity: 1 },
+            { slug: 'managed-blog', quantity: 1 },
             { slug: 'web-internal-page', quantity: 6 },
           ],
         }),
       );
-      // 7,999 + 200 + 1,500 + 2 × 950 = 11,599
-      expect(result.totals.totalCents).toBe(1_159_900);
+      // 7,999 + 900 + 2,500 + 2 × 950 = 13,299
+      expect(result.totals.totalCents).toBe(1_329_900);
     });
 
     it('Web Corporativa incluye los botones de redes sociales y no los cobra de nuevo', () => {
-      const result = calculateQuote(
-        catalog,
-        select({ packageSlug: 'web-corporativa', components: [{ slug: 'whatsapp-button', quantity: 1 }, { slug: 'instagram-button', quantity: 1 }] }),
-      );
+      const result = calculateQuote(catalog, select({ packageSlug: 'web-corporativa' }));
       expect(includedSlugs(result)).toEqual(expect.arrayContaining(['whatsapp-button', 'facebook-button', 'instagram-button', 'tiktok-button']));
-      expect(result.lines.filter((l) => l.kind === 'addon')).toEqual([]);
       expect(result.totals.totalCents).toBe(799_900);
+      expect(() =>
+        calculateQuote(catalog, select({ packageSlug: 'web-corporativa', components: [{ slug: 'instagram-button', quantity: 1 }] })),
+      ).toThrow('ya está incluido');
+    });
+
+    it('lo incluido se nombra como incluido, no como adicional', () => {
+      const result = calculateQuote(catalog, select({ packageSlug: 'landing-page' }));
+      expect(result.includedItems).toContainEqual(expect.objectContaining({ componentSlug: 'web-section', name: 'Secciones de la página', quantity: 4 }));
     });
   });
 
@@ -217,7 +255,12 @@ describe('motor de cotización', () => {
       const slugs = includedSlugs(result);
       expect(slugs).toEqual(expect.arrayContaining(['store-catalog', 'store-checkout', 'pos-register', 'pos-inventory', 'pos-customers', 'pos-online-orders']));
       expect(new Set(slugs).size).toBe(slugs.length);
-      expect(result.includedItems.every((i) => i.quantity === 1)).toBe(true);
+    });
+
+    it('sus items propios reemplazan la cantidad de los paquetes contenidos: una sola capacitación', () => {
+      const result = combo();
+      expect(result.includedItems.find((i) => i.componentSlug === 'initial-support')).toMatchObject({ quantity: 1, fromPackage: 'solucion-combinada' });
+      expect(result.includedItems.find((i) => i.componentSlug === 'revision-rounds')).toMatchObject({ quantity: 2, fromPackage: 'tienda-virtual' });
     });
 
     it('no cobra aparte la conexión tienda–POS', () => {
@@ -226,25 +269,29 @@ describe('motor de cotización', () => {
       expect(result.totals.subtotalCents).toBe(2_700_000);
       expect(result.status).toBe('priced');
       expect(() => calculateQuote(catalog, select({ packageSlug: 'solucion-combinada', components: [{ slug: 'pos-ecommerce-sync', quantity: 1 }] }))).toThrow(
-        'no se ofrece con Solución Combinada',
+        'ya está cubierto por Solución Combinada',
       );
     });
 
     it('ofrece los adicionales de ambos lados sin duplicar los compartidos', () => {
       const result = calculateQuote(
         catalog,
-        select({ packageSlug: 'solucion-combinada', components: [{ slug: 'bulk-sales', quantity: 1 }, { slug: 'stripe-payments', quantity: 1 }, { slug: 'pos-reports', quantity: 1 }] }),
+        select({ packageSlug: 'solucion-combinada', components: [{ slug: 'pos-suppliers', quantity: 1 }, { slug: 'stripe-payments', quantity: 1 }, { slug: 'wishlist', quantity: 1 }] }),
       );
       expect(result.blockingIssues).toEqual([]);
-      expect(result.lines.filter((l) => l.kind === 'addon').map((l) => l.componentSlug)).toEqual(['bulk-sales', 'stripe-payments', 'pos-reports']);
+      expect(result.lines.filter((l) => l.kind === 'addon').map((l) => l.componentSlug)).toEqual(['pos-suppliers', 'stripe-payments', 'wishlist']);
     });
   });
 
   describe('cambio de paquete y retiros', () => {
     it('un módulo opcional en un paquete queda incluido (sin cargo) en otro', () => {
-      // pos-online-orders no es complemento del POS, pero va incluido en la Solución Combinada.
-      const result = calculateQuote(catalog, select({ packageSlug: 'solucion-combinada', components: [{ slug: 'pos-online-orders', quantity: 1 }] }));
-      expect(result.lines.filter((l) => l.kind === 'addon')).toHaveLength(0);
+      // Reportes es complemento del POS, pero va incluido en la Solución Combinada.
+      const pos = calculateQuote(catalog, select({ packageSlug: 'punto-de-venta', components: [{ slug: 'pos-reports', quantity: 1 }] }));
+      expect(pos.lines.filter((l) => l.kind === 'addon')).toHaveLength(1);
+      expect(includedSlugs(calculateQuote(catalog, select({ packageSlug: 'solucion-combinada' })))).toContain('pos-reports');
+      expect(() =>
+        calculateQuote(catalog, select({ packageSlug: 'solucion-combinada', components: [{ slug: 'pos-reports', quantity: 1 }] })),
+      ).toThrow('ya está incluido');
     });
 
     it('los incluidos no se pueden retirar sin crédito aprobado configurado', () => {
@@ -273,10 +320,35 @@ describe('motor de cotización', () => {
       expect(result.totals.recurringAnnualCents).toBe(50_000);
     });
 
-    it('la tienda y el POS no anexan mantenimiento obligatorio', () => {
+    it('ningún paquete anexa mantenimiento obligatorio: el cliente lo elige', () => {
       const slugs = (packageSlug: string) => calculateQuote(catalog, select({ packageSlug })).recurring.map((r) => r.componentSlug);
-      expect(slugs('tienda-virtual')).toEqual(['domain-hosting']);
-      expect(slugs('punto-de-venta')).toEqual(['domain-hosting']);
+      for (const slug of ['landing-page', 'web-corporativa', 'tienda-virtual', 'punto-de-venta', 'solucion-combinada']) {
+        expect(slugs(slug)).toEqual(['domain-hosting']);
+      }
+    });
+
+    it('solo acepta los servicios que aplican al tipo de paquete', () => {
+      const recurring = (packageSlug: string, slugs: string[], components: { slug: string; quantity: number }[] = []) =>
+        calculateQuote(catalog, select({ packageSlug, recurring: slugs, components }));
+      expect(() => recurring('landing-page', ['support-pos'])).toThrow('no aplica a Landing Page');
+      expect(() => recurring('punto-de-venta', ['maintenance-web-basic'])).toThrow('no aplica');
+      expect(recurring('solucion-combinada', ['maintenance-ecommerce', 'support-pos']).blockingIssues).toEqual([]);
+      expect(recurring('software-personalizado', ['support-pos', 'integration-monitoring']).blockingIssues).toEqual([]);
+      // Monitoreo y licencias, solo si hay alguna integración o pasarela.
+      expect(() => recurring('landing-page', ['integration-monitoring'])).toThrow('no aplica');
+      expect(recurring('landing-page', ['integration-monitoring'], [{ slug: 'chatbot', quantity: 1 }]).recurring.map((r) => r.componentSlug)).toContain(
+        'integration-monitoring',
+      );
+      // La Solución Combinada ya incluye Mercado Pago.
+      expect(recurring('solucion-combinada', ['software-licenses']).recurring.map((r) => r.componentSlug)).toContain('software-licenses');
+    });
+
+    it('en renta, el mantenimiento ya va en la mensualidad y no se contrata aparte', () => {
+      expect(() =>
+        calculateQuote(catalog, select({ paymentMode: 'subscription', packageSlug: 'tienda-virtual', recurring: ['maintenance-ecommerce'] })),
+      ).toThrow('ya está incluido en tu renta');
+      const pos = calculateQuote(catalog, select({ paymentMode: 'subscription', packageSlug: 'punto-de-venta', recurring: ['support-pos'] }));
+      expect(pos.recurring.map((r) => r.componentSlug)).toContain('support-pos');
     });
 
     it('sin vigencia, ninguna cotización se presenta como definitiva', () => {
@@ -350,7 +422,7 @@ describe('motor de cotización', () => {
   });
 
   it('es determinista: la misma entrada produce exactamente el mismo resultado', () => {
-    const input = select({ packageSlug: 'solucion-combinada', components: [{ slug: 'pos-reports', quantity: 1 }] });
+    const input = select({ packageSlug: 'solucion-combinada', components: [{ slug: 'pos-suppliers', quantity: 1 }] });
     expect(calculateQuote(catalog, input)).toEqual(calculateQuote(catalog, input));
   });
 });

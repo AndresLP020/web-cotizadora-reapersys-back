@@ -37,6 +37,7 @@ export function seedSnapshot(overrides: SnapshotOverrides = {}): CatalogSnapshot
       taxable: true,
       maxQuantity: seed.maxQuantity ?? 1,
       exclusiveGroup: seed.exclusiveGroup,
+      includedLabel: seed.includedLabel,
       price: {
         priceId: `price-${seed.slug}`,
         version: 1,
@@ -65,7 +66,7 @@ export function seedSnapshot(overrides: SnapshotOverrides = {}): CatalogSnapshot
       category: seed.category,
       pricingType: seed.pricingType ?? 'fixed',
       active: true,
-      features: [...seed.features],
+      features: seed.features.map((f) => f.text),
       items: (seed.items ?? []).map(toItem),
       variantGroups: (seed.variantGroups ?? []).map((g) => ({
         key: g.key,
@@ -77,6 +78,7 @@ export function seedSnapshot(overrides: SnapshotOverrides = {}): CatalogSnapshot
       comboPolicy: seed.comboPolicy,
       recommendedRecurringIds: seed.recommendedRecurring ?? [],
       addOnIds: seed.addOns ?? [],
+      equivalentIds: seed.equivalents ?? [],
       price: {
         priceId: `price-${seed.slug}`,
         version: 1,

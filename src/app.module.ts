@@ -17,6 +17,7 @@ import { SecurityModule } from './security/security.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { TestimonialsModule } from './modules/testimonials/testimonials.module';
+import { DigitalModule } from './modules/digital/digital.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { TestimonialsModule } from './modules/testimonials/testimonials.module';
     AdminModule,
     BillingModule,
     TestimonialsModule,
+    DigitalModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

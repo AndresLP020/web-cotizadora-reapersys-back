@@ -209,11 +209,15 @@ export class Package {
   recommendedRecurring!: Types.ObjectId[];
 
   /**
-   * Complementos opcionales compatibles. Si la lista tiene elementos, SOLO esos se ofrecen
-   * (y se aceptan) como adicionales del paquete; vacía = cualquier complemento público compatible.
+   * Complementos opcionales compatibles: SOLO esos se ofrecen (y se aceptan) como adicionales
+   * del paquete, sin lo que ya incluye. Vacía = el paquete no tiene adicionales.
    */
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Component' }], default: [] })
   addOns!: Types.ObjectId[];
+
+  /** Componentes que el paquete ya cubre aunque no estén en items: nunca se ofrecen ni se aceptan como adicionales. */
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Component' }], default: [] })
+  equivalents!: Types.ObjectId[];
 
   @Prop({ type: RentalProfileSchema, default: () => ({ enabled: false }) })
   rentalProfile!: RentalProfile;

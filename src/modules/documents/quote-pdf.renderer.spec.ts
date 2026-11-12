@@ -16,7 +16,7 @@ const base = (overrides: Partial<QuotePdfData> = {}): QuotePdfData => ({
     variants: {},
     removedComponents: [],
     components: [
-      { slug: 'seo-initial', quantity: 1 },
+      { slug: 'managed-blog', quantity: 1 },
       { slug: 'web-internal-page', quantity: 6 },
     ],
     recurring: ['maintenance-web-business'],

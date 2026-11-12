@@ -29,10 +29,10 @@ services:
         generateValue: true
       # URL pública del frontend en Vercel (o el dominio propio), sin "/" final.
       - key: PUBLIC_APP_URL
-        sync: false
+        value: https://web-cotizadora-reapersys-front.vercel.app
       # Orígenes permitidos (https), separados por coma; normalmente igual a PUBLIC_APP_URL.
       - key: CORS_ORIGINS
-        sync: false
+        value: https://web-cotizadora-reapersys-front.vercel.app
       # "smtp" (Gmail con contraseña de aplicación), "resend" (exige RESEND_API_KEY)
       # o "simulated" (registra sin enviar). SMTP requiere plan de pago: Render bloquea
       # los puertos SMTP en el plan free.

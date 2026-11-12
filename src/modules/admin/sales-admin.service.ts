@@ -246,6 +246,7 @@ export class SalesAdminService {
         source: l.source,
         status: l.status,
         quoteId: l.quote?.toString() ?? null,
+        digitalOrder: l.digitalOrder ?? null,
         createdAt: l.createdAt,
       })),
     };

@@ -18,6 +18,12 @@ export interface PublicComponentRef {
   slug: string;
   name: string;
   unit: string;
+  /** Nombre cuando viene incluido («Secciones de la página»). */
+  includedLabel?: string;
+  /** Lo que contiene sin ser un componente propio («Productos ilimitados»). */
+  highlights: string[];
+  /** Se vende también por separado (puede aparecer en «Puedes agregar» para unidades extra). */
+  maxQuantity: number;
 }
 
 export interface PublicPackageItem {
@@ -64,6 +70,11 @@ export interface PublicPackage {
   sortOrder: number;
   /** Renta mensual (suscripción); null si el paquete no se ofrece en renta. */
   subscription: PublicSubscriptionOffer | null;
+  /**
+   * Informativo: lo que costarían por separado los items incluidos que también se venden como
+   * complemento (cantidad × precio fijo publicado). No altera el total. 0 = nada que mostrar.
+   */
+  includedValueCents: number;
 }
 
 export interface PublicSubscriptionOffer {
@@ -86,13 +97,17 @@ export interface PublicPackageDetail extends PublicPackage {
   pricingType: PackagePricingType;
   items: PublicPackageItem[];
   variantGroups: PublicVariantGroup[];
-  includedPackages: { slug: string; name: string; variants: Record<string, string> }[];
+  /** Paquetes contenidos (combos) con sus items, variantes fijadas incluidas. */
+  includedPackages: { slug: string; name: string; variants: Record<string, string>; items: PublicPackageItem[] }[];
   recommendedRecurring: PublicComponent[];
   /**
-   * Complementos opcionales compatibles con el paquete («Puedes agregar»), con sus dependencias.
-   * Vacío = el paquete no restringe sus complementos.
+   * Complementos que se pueden agregar («Puedes agregar»), con sus dependencias. Ya excluye lo
+   * incluido y lo equivalente, salvo los cuantificables incluidos (solo unidades extra).
+   * Vacío = el paquete no tiene adicionales.
    */
   addOns: PublicComponent[];
+  /** Slugs de lo que el paquete ya cubre aunque no esté en items: nunca se ofrecen. */
+  equivalents: string[];
   /** Slugs de los servicios que la mensualidad ya cubre (no se contratan aparte en suscripción). */
   subscriptionIncludedServices: string[];
 }

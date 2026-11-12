@@ -87,6 +87,14 @@ export class Component {
   @Prop({ trim: true, maxlength: 60 })
   exclusiveGroup?: string;
 
+  /** Nombre cuando viene incluido en un paquete («Secciones de la página» en vez de «Sección adicional»). */
+  @Prop({ trim: true, maxlength: 160 })
+  includedLabel?: string;
+
+  /** Lo que contiene el componente sin ser un componente propio («Productos ilimitados»). Sin precio. */
+  @Prop({ type: [String], default: [] })
+  highlights!: string[];
+
   @Prop({ default: 0 })
   sortOrder!: number;
 }

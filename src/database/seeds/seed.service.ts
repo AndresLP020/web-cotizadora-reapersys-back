@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import type { Model, Types } from 'mongoose';
+import { type Model, Types, type UpdateQuery } from 'mongoose';
 import { fromWholePesos } from '../../common/money/money';
 import { SYSTEM_ACTOR } from '../../modules/audit/audit.service';
 import { Category } from '../../modules/catalog/schemas/category.schema';
@@ -45,18 +45,31 @@ export interface SeedReport {
   retiredPackages: number;
   /** Cambios aplicados una sola vez al introducir dominio y hosting anuales. */
   infrastructureUpgrade: number;
+  /** Paquetes, componentes y reglas existentes alineados con el contenido vigente de cada paquete. */
+  catalogSync: number;
 }
 
 /** Servicios que «Hosting» y «Dominio» anuales reemplazan. */
 const LEGACY_INFRASTRUCTURE_SLUGS = ['managed-hosting', 'domain'];
 
+/** Complementos retirados del catálogo: se desactivan (las cotizaciones emitidas conservan su snapshot). */
+const RETIRED_COMPONENT_SLUGS = [
+  // Cobraba por producto: el catálogo de tienda, POS y combo no tiene límite de productos.
+  'ecommerce-product',
+];
+
+/** Descripciones anteriores que el seed corrige solo si nadie las editó desde el panel. */
+const OUTDATED_DESCRIPTIONS = [{ slug: 'pos-csv-import-export', description: 'Hasta 2,000 productos por archivo en la referencia.' }];
+
 const SEED_ACTOR = SYSTEM_ACTOR('seed');
 
 /**
  * Carga el catálogo inicial. Idempotente y NO destructivo:
- * - Solo inserta entidades que no existen (por slug/clave); jamás modifica las existentes.
+ * - Inserta las entidades que no existen (por slug/clave).
  * - Solo crea la versión 1 de un precio si el elemento no tiene ninguna versión.
- * Así, volver a ejecutarlo nunca revierte cambios hechos por el administrador.
+ * - Sincroniza el CONTENIDO de los paquetes (items, características, complementos, equivalentes),
+ *   las etiquetas de los componentes y las reglas: nada de eso se edita desde el panel.
+ * Así, volver a ejecutarlo nunca revierte precios ni cambios hechos por el administrador.
  */
 @Injectable()
 export class SeedService {
@@ -89,6 +102,7 @@ export class SeedService {
       rentalBackfill: 0,
       retiredPackages: 0,
       infrastructureUpgrade: 0,
+      catalogSync: 0,
     };
     const missing = trusted({ $exists: false });
 
@@ -201,6 +215,15 @@ export class SeedService {
             softwareOnly: seed.rental.softwareOnly ?? false,
           }
         : { enabled: false };
+    /** Lo que el paquete incluye y ofrece: se inserta y, en bases existentes, se sincroniza. */
+    const packageContent = (seed: SeedPackage) => ({
+      features: seed.features.map((f) => f.text),
+      notes: seed.notes ?? [],
+      items: (seed.items ?? []).map(toItem),
+      recommendedRecurring: (seed.recommendedRecurring ?? []).map(componentId),
+      addOns: (seed.addOns ?? []).map(componentId),
+      equivalents: (seed.equivalents ?? []).map(componentId),
+    });
     const ordered = [...seedPackages.filter((p) => p.category !== 'combo'), ...seedPackages.filter((p) => p.category === 'combo')];
     for (const seed of ordered) {
       const packageIds = await this.idsBySlug(this.packages);
@@ -212,10 +235,8 @@ export class SeedService {
           name: seed.name,
           category: seed.category,
           summary: seed.summary,
-          features: seed.features,
-          notes: seed.notes ?? [],
+          ...packageContent(seed),
           pricingType: seed.pricingType ?? 'fixed',
-          items: (seed.items ?? []).map(toItem),
           variantGroups: (seed.variantGroups ?? []).map((group) => ({
             ...group,
             options: group.options.map((option) => ({ ...option, items: option.items.map(toItem) })),
@@ -226,8 +247,6 @@ export class SeedService {
             return { package: id, variants: included.variants ?? {} };
           }),
           comboPolicy: seed.comboPolicy,
-          recommendedRecurring: (seed.recommendedRecurring ?? []).map(componentId),
-          addOns: (seed.addOns ?? []).map(componentId),
           rentalProfile: rentalProfileOf(seed),
           status: 'active',
           featured: seed.featured ?? false,
@@ -289,6 +308,7 @@ export class SeedService {
     }
 
     if (upgradeInfrastructure) report.infrastructureUpgrade = await this.upgradeInfrastructure(componentId);
+    report.catalogSync = await this.syncCatalog(packageContent, componentId);
 
     this.logger.log(`Seed completado: ${JSON.stringify(report)}`);
     return report;
@@ -312,6 +332,46 @@ export class SeedService {
       ).modifiedCount;
     }
     changes += (await this.packages.updateOne({ slug: 'web-corporativa', features: trusted({ $ne: CORPORATE_SOCIAL_FEATURE }) }, { $push: { features: CORPORATE_SOCIAL_FEATURE } })).modifiedCount;
+    return changes;
+  }
+
+  /**
+   * Alinea una base ya poblada con el catálogo vigente. Solo toca lo que el panel no edita
+   * (contenido de paquetes, etiquetas de componentes y reglas); nunca precios, renta ni cotizaciones.
+   * Idempotente: una segunda ejecución no modifica nada.
+   */
+  private async syncCatalog(
+    packageContent: (seed: SeedPackage) => object,
+    componentId: (slug: string) => Types.ObjectId,
+  ): Promise<number> {
+    let changes = 0;
+    // Se compara antes de escribir: con timestamps, todo updateOne cuenta como modificación.
+    const sync = async <T>(model: Model<T>, filter: Record<string, unknown>, target: Record<string, unknown>, unset: string[] = []) => {
+      const current = await model.findOne(filter, Object.fromEntries([...Object.keys(target), ...unset].map((k) => [k, 1]))).lean<Record<string, unknown>>();
+      if (!current) return;
+      const stale = Object.entries(target).some(([key, value]) => !sameValue(current[key], value)) || unset.some((key) => current[key] !== undefined);
+      if (!stale) return;
+      const update: UpdateQuery<T> = { $set: target, ...(unset.length > 0 ? { $unset: Object.fromEntries(unset.map((k) => [k, 1])) } : {}) } as UpdateQuery<T>;
+      await model.updateOne(filter, update);
+      changes += 1;
+    };
+
+    for (const seed of seedComponents) {
+      const highlights = seed.highlights ?? [];
+      if (seed.includedLabel) await sync(this.components, { slug: seed.slug }, { includedLabel: seed.includedLabel, highlights });
+      else await sync(this.components, { slug: seed.slug }, { highlights }, ['includedLabel']);
+    }
+    for (const { slug, description } of OUTDATED_DESCRIPTIONS) {
+      const current = seedComponents.find((c) => c.slug === slug)!.description;
+      changes += (await this.components.updateOne({ slug, description }, { $set: { description: current } })).modifiedCount;
+    }
+    changes += (await this.components.updateMany({ slug: inValues(RETIRED_COMPONENT_SLUGS), status: 'active' }, { $set: { status: 'inactive' } })).modifiedCount;
+    for (const seed of seedPackages) {
+      await sync(this.packages, { slug: seed.slug }, packageContent(seed) as Record<string, unknown>);
+    }
+    for (const rule of seedRules) {
+      await sync(this.rules, { key: rule.key }, { packageCategories: rule.packageCategories ?? [], targets: (rule.targets ?? []).map(componentId), message: rule.message });
+    }
     return changes;
   }
 
@@ -347,4 +407,22 @@ export class SeedService {
     const docs = await (model as Model<{ slug: string }>).find({}, { slug: 1 }).lean<{ _id: Types.ObjectId; slug: string }[]>();
     return new Map(docs.map((doc) => [doc.slug, doc._id]));
   }
+}
+
+/** Igualdad por valor (ObjectId como texto, sin depender del orden de las claves). */
+function sameValue(a: unknown, b: unknown): boolean {
+  const normalize = (value: unknown): unknown => {
+    if (value instanceof Types.ObjectId) return value.toString();
+    if (Array.isArray(value)) return value.map(normalize);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .filter(([, v]) => v !== undefined)
+          .sort(([x], [y]) => x.localeCompare(y))
+          .map(([k, v]) => [k, normalize(v)]),
+      );
+    }
+    return value;
+  };
+  return JSON.stringify(normalize(a ?? null)) === JSON.stringify(normalize(b ?? null));
 }

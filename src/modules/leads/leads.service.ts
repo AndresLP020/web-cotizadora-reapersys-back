@@ -6,7 +6,7 @@ import { generatePublicReference } from '../../common/security/public-reference'
 import { AppConfigService } from '../../config/app-config.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CONTACT_CONSENT_VERSION, type CreateContactDto } from './dto/create-contact.dto';
-import { Lead } from './schemas/lead.schema';
+import { type DigitalOrder, Lead } from './schemas/lead.schema';
 
 export interface RequestContext {
   ip?: string;
@@ -57,6 +57,32 @@ export class LeadsService {
 
     await this.notifications.scheduleForNewLead(lead._id);
     this.logger.log(`Nuevo prospecto ${lead.reference} desde formulario de contacto.`);
+    return { reference: lead.reference };
+  }
+
+  /** Registra el pedido de un detalle digital o de tarjetas NFC como prospecto. */
+  async createFromDigitalOrder(
+    order: { name: string; email: string; phone: string; message: string; consentVersion: string; digitalOrder: DigitalOrder },
+    context: RequestContext,
+  ): Promise<{ reference: string }> {
+    const lead = await this.leadModel.create({
+      reference: generatePublicReference(),
+      name: order.name,
+      email: order.email,
+      phone: order.phone,
+      interest: order.digitalOrder.kind,
+      message: order.message,
+      source: 'digital_order',
+      status: 'new',
+      consent: { contact: true, textVersion: order.consentVersion, acceptedAt: new Date() },
+      requestMeta: {
+        ipHash: context.ip ? hashIp(context.ip, this.config.get('SESSION_SECRET')) : undefined,
+        userAgent: context.userAgent?.slice(0, 300),
+      },
+      digitalOrder: order.digitalOrder,
+    });
+    await this.notifications.scheduleForNewLead(lead._id);
+    this.logger.log(`Nuevo pedido digital ${lead.reference} (${order.digitalOrder.templateSlug}).`);
     return { reference: lead.reference };
   }
 }

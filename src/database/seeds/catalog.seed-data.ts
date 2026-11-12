@@ -44,8 +44,24 @@ export interface SeedComponent {
   requiresEvaluation?: boolean;
   maxQuantity?: number;
   exclusiveGroup?: string;
+  /** Nombre cuando viene incluido en un paquete («Secciones de la página» en vez de «Sección adicional»). */
+  includedLabel?: string;
+  /** Lo que contiene el componente sin ser un componente propio (sin precio). */
+  highlights?: string[];
   price: SeedPrice;
 }
+
+/**
+ * Característica comercial de la tarjeta del paquete. `covers` son los slugs de los items (o de
+ * los paquetes contenidos, con prefijo `@`) que describe: ninguna característica habla de algo
+ * que el paquete no incluya, y todo lo incluido aparece en alguna característica.
+ */
+export interface SeedFeature {
+  text: string;
+  covers: string[];
+}
+
+const feature = (text: string, ...covers: string[]): SeedFeature => ({ text, covers });
 
 export interface SeedPackageItem {
   component: string;
@@ -59,7 +75,7 @@ export interface SeedPackage {
   name: string;
   category: PackageCategory;
   summary: string;
-  features: string[];
+  features: SeedFeature[];
   notes?: string[];
   pricingType?: PackagePricingType;
   items?: SeedPackageItem[];
@@ -74,6 +90,8 @@ export interface SeedPackage {
   recommendedRecurring?: string[];
   /** Complementos opcionales compatibles con el paquete (solo estos se ofrecen en «Puedes agregar»). */
   addOns?: string[];
+  /** Componentes que el paquete ya cubre aunque no estén en items: nunca se ofrecen. */
+  equivalents?: string[];
   featured?: boolean;
   /** Suscripción mensual (se asigna abajo, por tipo de paquete). */
   rental?: SeedRentalProfile;
@@ -125,8 +143,8 @@ const from = (pesos: number): SeedPrice => ({ mode: 'starting_at', pesos });
 
 export const seedComponents: SeedComponent[] = [
   // Desarrollo web — complementos públicos
-  { sku: 'WEB-SECTION', slug: 'web-section', name: 'Sección adicional', category: 'desarrollo-web', kind: 'feature', unit: 'sección', publicVisible: true, maxQuantity: 30, price: fixed(450) },
-  { sku: 'WEB-PAGE', slug: 'web-internal-page', name: 'Página interna adicional', category: 'desarrollo-web', kind: 'feature', unit: 'página', publicVisible: true, maxQuantity: 30, price: fixed(950) },
+  { sku: 'WEB-SECTION', slug: 'web-section', name: 'Sección adicional', category: 'desarrollo-web', kind: 'feature', unit: 'sección', publicVisible: true, maxQuantity: 30, includedLabel: 'Secciones de la página', price: fixed(450) },
+  { sku: 'WEB-PAGE', slug: 'web-internal-page', name: 'Página interna adicional', category: 'desarrollo-web', kind: 'feature', unit: 'página', publicVisible: true, maxQuantity: 30, includedLabel: 'Páginas internas', price: fixed(950) },
   { sku: 'WEB-GALLERY', slug: 'web-gallery', name: 'Galería', category: 'desarrollo-web', kind: 'feature', publicVisible: true, price: fixed(700) },
   { sku: 'WEB-SEO', slug: 'seo-initial', name: 'SEO inicial', category: 'desarrollo-web', kind: 'service', publicVisible: true, price: fixed(1500) },
   { sku: 'WEB-BLOG', slug: 'managed-blog', name: 'Blog administrable', category: 'desarrollo-web', kind: 'feature', publicVisible: true, price: fixed(2500) },
@@ -134,8 +152,8 @@ export const seedComponents: SeedComponent[] = [
   { sku: 'WEB-ADV-ANIM', slug: 'advanced-animations', name: 'Animaciones avanzadas', category: 'desarrollo-web', kind: 'feature', publicVisible: true, requiresEvaluation: true, price: from(1500) },
 
   // Desarrollo web — bases incluidas en paquetes (no se venden por separado)
-  { sku: 'WEB-LANDING', slug: 'landing-page-build', name: 'Desarrollo de landing page', category: 'desarrollo-web', kind: 'service', unit: 'proyecto', price: PENDING },
-  { sku: 'WEB-CORPORATE', slug: 'corporate-site-build', name: 'Desarrollo de sitio web corporativo', category: 'desarrollo-web', kind: 'service', unit: 'proyecto', price: PENDING },
+  { sku: 'WEB-LANDING', slug: 'landing-page-build', name: 'Desarrollo de landing page', category: 'desarrollo-web', kind: 'service', unit: 'proyecto', highlights: ['Presentación del negocio', 'Navegación', 'Botón de llamado a la acción'], price: PENDING },
+  { sku: 'WEB-CORPORATE', slug: 'corporate-site-build', name: 'Desarrollo de sitio web corporativo', category: 'desarrollo-web', kind: 'service', unit: 'proyecto', highlights: ['Información empresarial', 'Presentación de servicios', 'Navegación profesional'], price: PENDING },
 
   // Redes y contacto
   { sku: 'SOC-WA-BTN', slug: 'whatsapp-button', name: 'Botón de WhatsApp', category: 'redes-contacto', kind: 'feature', publicVisible: true, price: fixed(350) },
@@ -151,7 +169,6 @@ export const seedComponents: SeedComponent[] = [
   { sku: 'SOC-CHATBOT', slug: 'chatbot', name: 'Chatbot', category: 'redes-contacto', kind: 'service', publicVisible: true, requiresEvaluation: true, price: from(4500) },
 
   // E-commerce — complementos públicos
-  { sku: 'ECO-PRODUCT', slug: 'ecommerce-product', name: 'Producto adicional', description: 'El catálogo de la tienda no tiene límite de productos.', category: 'ecommerce', kind: 'feature', unit: 'producto', publicVisible: false, maxQuantity: 1000, price: fixed(60) },
   { sku: 'ECO-GATEWAY', slug: 'payment-gateway', name: 'Pasarela de pago adicional', category: 'ecommerce', kind: 'service', unit: 'pasarela', publicVisible: true, maxQuantity: 5, price: fixed(1500) },
   { sku: 'ECO-SHIPPING-ADV', slug: 'advanced-shipping', name: 'Configuración avanzada de envíos', category: 'ecommerce', kind: 'service', publicVisible: true, requiresEvaluation: true, price: from(1500) },
   { sku: 'ECO-SUBSCRIPTIONS', slug: 'subscriptions', name: 'Suscripciones', category: 'ecommerce', kind: 'feature', publicVisible: true, requiresEvaluation: true, price: from(3500) },
@@ -174,7 +191,7 @@ export const seedComponents: SeedComponent[] = [
 
   // Tienda virtual (ARISE Parte 1) — incluidas en el paquete base, no se venden por separado
   { sku: 'TV-PUBLIC-SITE', slug: 'store-public-site', name: 'Página pública de la tienda', description: 'Navbar responsive, hero, footer y secciones principales.', category: 'modulos-tienda', kind: 'feature', price: PENDING },
-  { sku: 'TV-CATALOG', slug: 'store-catalog', name: 'Catálogo de productos', description: 'Productos activos con imagen, nombre, descripción, precio y categoría.', category: 'modulos-tienda', kind: 'feature', price: PENDING },
+  { sku: 'TV-CATALOG', slug: 'store-catalog', name: 'Catálogo de productos', description: 'Productos activos con imagen, nombre, descripción, precio y categoría.', category: 'modulos-tienda', kind: 'feature', highlights: ['Productos ilimitados'], price: PENDING },
   { sku: 'TV-DISCOVERY', slug: 'store-search-filters', name: 'Búsqueda, filtro y paginación', description: 'Búsqueda por nombre, categoría, descripción o código; filtro por categoría y paginación.', category: 'modulos-tienda', kind: 'feature', price: PENDING },
   { sku: 'TV-FEATURED', slug: 'store-featured-products', name: 'Productos destacados', description: 'Hasta seis productos destacados, configurados en el sistema.', category: 'modulos-tienda', kind: 'feature', price: PENDING },
   { sku: 'TV-CART', slug: 'store-cart', name: 'Carrito de compras', description: 'Agregar, modificar cantidades, quitar, vaciar, subtotales y persistencia local.', category: 'modulos-tienda', kind: 'feature', price: PENDING },
@@ -200,7 +217,7 @@ export const seedComponents: SeedComponent[] = [
   // Punto de venta (ARISE Parte 2) — incluidas en el paquete base
   { sku: 'POS-AUTH', slug: 'pos-auth', name: 'Inicio de sesión y seguridad', description: 'Inicio de sesión, sesiones y restricciones de operaciones.', category: 'modulos-pos', kind: 'feature', price: PENDING },
   { sku: 'POS-DASHBOARD', slug: 'pos-dashboard', name: 'Dashboard', description: 'Productos activos, transacciones, stock bajo, ventas recientes y productos más vendidos.', category: 'modulos-pos', kind: 'feature', price: PENDING },
-  { sku: 'POS-PRODUCTS', slug: 'pos-products', name: 'Productos', description: 'Alta, consulta y edición: códigos, categorías, costos, precios, activo/inactivo, imagen y stock.', category: 'modulos-pos', kind: 'feature', price: PENDING },
+  { sku: 'POS-PRODUCTS', slug: 'pos-products', name: 'Productos', description: 'Alta, consulta y edición: códigos, categorías, costos, precios, activo/inactivo, imagen y stock.', category: 'modulos-pos', kind: 'feature', highlights: ['Productos ilimitados'], price: PENDING },
   { sku: 'POS-INVENTORY', slug: 'pos-inventory', name: 'Inventario', description: 'Stock mínimo, advertencias y descuento al registrar una venta.', category: 'modulos-pos', kind: 'feature', price: PENDING },
   { sku: 'POS-REGISTER', slug: 'pos-register', name: 'Venta en caja', description: 'Búsqueda o escaneo por código, carrito, cantidades, precio de línea, cobro, cambio y saldo.', category: 'modulos-pos', kind: 'feature', price: PENDING },
   { sku: 'POS-TICKETS', slug: 'pos-tickets', name: 'Tickets', description: 'Impresión de tickets de venta.', category: 'modulos-pos', kind: 'feature', price: PENDING },
@@ -211,7 +228,7 @@ export const seedComponents: SeedComponent[] = [
   { sku: 'POS-ONLINE-ORDERS', slug: 'pos-online-orders', name: 'Pedidos en línea desde el POS', description: 'Administra desde el POS los pedidos de la tienda virtual, sus pagos, comprobantes y estados.', category: 'modulos-pos', kind: 'feature', price: PENDING },
 
   // Punto de venta — adicionales (precio por aprobar desde Administración)
-  { sku: 'POS-CSV', slug: 'pos-csv-import-export', name: 'Importar y exportar productos (CSV)', description: 'Hasta 2,000 productos por archivo en la referencia.', category: 'modulos-pos', kind: 'feature', publicVisible: true, price: PENDING },
+  { sku: 'POS-CSV', slug: 'pos-csv-import-export', name: 'Importar y exportar productos (CSV)', description: 'Importación y exportación del catálogo en Excel/CSV, sin límite de productos.', category: 'modulos-pos', kind: 'feature', publicVisible: true, includedLabel: 'Importación y exportación de catálogo (Excel/CSV), sin límite de productos', price: PENDING },
   { sku: 'POS-SUPPLIERS', slug: 'pos-suppliers', name: 'Proveedores', description: 'Registro y gestión de proveedores asociados a los productos.', category: 'modulos-pos', kind: 'feature', publicVisible: true, price: PENDING },
   { sku: 'POS-SUPPLIER-ACCT', slug: 'pos-supplier-accounts', name: 'Cuentas de proveedores', description: 'Deudas, pagos y movimientos de proveedores. Requiere el módulo Proveedores.', category: 'modulos-pos', kind: 'feature', publicVisible: true, price: PENDING },
   { sku: 'POS-CREDIT', slug: 'pos-credit-sales', name: 'Ventas a crédito', description: 'Ventas con crédito, deudores y abonos.', category: 'modulos-pos', kind: 'feature', publicVisible: true, price: PENDING },
@@ -253,8 +270,34 @@ export const seedComponents: SeedComponent[] = [
 
   // Servicios de implementación
   { sku: 'SRV-POS-INSTALL', slug: 'pos-installation', name: 'Instalación', category: 'servicios-implementacion', kind: 'service', price: PENDING },
-  { sku: 'SRV-INIT-SUPPORT', slug: 'initial-support', name: 'Soporte inicial', category: 'servicios-implementacion', kind: 'service', price: PENDING },
-  { sku: 'SRV-CUSTOM-SW', slug: 'custom-software', name: 'Software personalizado', description: 'Desarrollo a la medida. Se cotiza tras evaluar el alcance.', category: 'servicios-implementacion', kind: 'service', unit: 'proyecto', publicVisible: true, requiresEvaluation: true, price: PENDING },
+  { sku: 'SRV-INIT-SUPPORT', slug: 'initial-support', name: 'Soporte inicial', category: 'servicios-implementacion', kind: 'service', includedLabel: 'Soporte inicial y capacitación', price: PENDING },
+  { sku: 'SRV-CUSTOM-SW', slug: 'custom-software', name: 'Software personalizado', description: 'Desarrollo a la medida. Se cotiza tras evaluar el alcance.', category: 'servicios-implementacion', kind: 'service', unit: 'proyecto', publicVisible: true, requiresEvaluation: true, includedLabel: 'Desarrollo a la medida', price: PENDING },
+
+  // Partes de los paquetes: describen lo incluido, no se venden por separado.
+  { sku: 'WEB-RESPONSIVE', slug: 'responsive-design', name: 'Diseño adaptable a celular, tableta y computadora', category: 'desarrollo-web', kind: 'feature', price: PENDING },
+  { sku: 'WEB-SEO-BASIC', slug: 'basic-seo-tags', name: 'Optimización básica para buscadores', description: 'Títulos, descripciones y vista previa al compartir.', category: 'desarrollo-web', kind: 'feature', price: PENDING },
+  { sku: 'WEB-SSL', slug: 'ssl-certificate', name: 'Certificado de seguridad (HTTPS)', category: 'desarrollo-web', kind: 'service', price: PENDING },
+  { sku: 'WEB-ANALYTICS', slug: 'web-analytics', name: 'Medición de visitas (Google Analytics)', category: 'desarrollo-web', kind: 'service', price: PENDING },
+  { sku: 'WEB-PRIVACY', slug: 'privacy-notice-page', name: 'Página de aviso de privacidad', category: 'desarrollo-web', kind: 'feature', price: PENDING },
+  { sku: 'SOC-MAPS', slug: 'google-maps', name: 'Ubicación con Google Maps', category: 'redes-contacto', kind: 'feature', price: PENDING },
+  { sku: 'SRV-PUBLISH', slug: 'site-publishing', name: 'Publicación del sitio', category: 'servicios-implementacion', kind: 'service', price: PENDING },
+  { sku: 'SRV-REVISIONS', slug: 'revision-rounds', name: 'Rondas de ajustes al diseño', category: 'servicios-implementacion', kind: 'service', unit: 'ronda', price: PENDING },
+  { sku: 'SRV-MAIL-SETUP', slug: 'corporate-email-setup', name: 'Configuración de correo con tu dominio', description: 'Las licencias de correo se pagan al proveedor.', category: 'servicios-implementacion', kind: 'service', unit: 'cuenta', price: PENDING },
+  { sku: 'TV-ADMIN', slug: 'store-admin-panel', name: 'Panel de administración (productos, categorías, pedidos, existencias)', category: 'modulos-tienda', kind: 'feature', highlights: ['Productos ilimitados', 'Categorías ilimitadas'], price: PENDING },
+  { sku: 'TV-TERMS', slug: 'store-terms-page', name: 'Páginas de términos, envíos y devoluciones', category: 'modulos-tienda', kind: 'feature', price: PENDING },
+  { sku: 'TV-IMPORT', slug: 'store-catalog-import', name: 'Importación de catálogo desde Excel/CSV, sin límite de productos', description: 'El cliente entrega su catálogo en la plantilla; nosotros lo importamos y validamos.', category: 'modulos-tienda', kind: 'service', price: PENDING },
+  { sku: 'POS-CASH-CUT', slug: 'pos-cash-cut', name: 'Apertura y corte de caja', category: 'modulos-pos', kind: 'feature', price: PENDING },
+  { sku: 'POS-BACKUP', slug: 'pos-local-backup', name: 'Respaldo automático de la información', category: 'modulos-pos', kind: 'feature', price: PENDING },
+  { sku: 'POS-UNIFIED', slug: 'unified-dashboard', name: 'Panel unificado de ventas en línea y en mostrador', category: 'modulos-pos', kind: 'feature', highlights: ['Un solo catálogo e inventario para tienda y caja'], price: PENDING },
+  { sku: 'SRV-ASSESSMENT', slug: 'technical-assessment', name: 'Evaluación técnica del proceso', category: 'servicios-implementacion', kind: 'service', price: PENDING },
+  { sku: 'SRV-SCOPE', slug: 'scope-specification', name: 'Especificación del alcance por escrito', category: 'servicios-implementacion', kind: 'service', price: PENDING },
+  { sku: 'SRV-ADMIN-PANEL', slug: 'custom-admin-panel', name: 'Panel de administración', category: 'servicios-implementacion', kind: 'feature', price: PENDING },
+  { sku: 'SRV-ROLES', slug: 'custom-roles', name: 'Usuarios con roles y permisos', category: 'servicios-implementacion', kind: 'feature', price: PENDING },
+  { sku: 'SRV-DOCS', slug: 'technical-docs', name: 'Documentación de uso y técnica', category: 'servicios-implementacion', kind: 'service', price: PENDING },
+  { sku: 'SRV-PROGRESS', slug: 'progress-reviews', name: 'Revisiones de avance por etapa', category: 'servicios-implementacion', kind: 'service', price: PENDING },
+  { sku: 'SRV-ADVISORY', slug: 'advisory-session', name: 'Asesoría comercial', category: 'servicios-implementacion', kind: 'service', price: PENDING },
+  { sku: 'SRV-RECOMMEND', slug: 'solution-recommendation', name: 'Recomendación de solución', category: 'servicios-implementacion', kind: 'service', price: PENDING },
+  { sku: 'SRV-TAILORED', slug: 'tailored-quote', name: 'Cotización a la medida', category: 'servicios-implementacion', kind: 'service', price: PENDING },
 
   // Servicios recurrentes (se muestran aparte del total de implementación)
   { sku: 'MNT-WEB-BASIC', slug: 'maintenance-web-basic', name: 'Mantenimiento web básico', category: 'servicios-recurrentes', kind: 'recurring_service', billing: 'monthly', unit: 'mes', publicVisible: true, exclusiveGroup: 'web-maintenance', price: fixed(399) },
@@ -291,70 +334,22 @@ export const RETIRED_PACKAGE_SLUGS = [
   'reaper-enterprise',
 ];
 
-const PROPOSAL_NOTE = 'Distribución de funcionalidades propuesta, pendiente de validación comercial.';
 const PENDING_ADDONS_NOTE = 'Los adicionales sin precio aprobado se muestran como «Por cotizar» y no se suman al total.';
 const GATEWAYS_NOTE = 'Las pasarelas externas requieren cuentas y credenciales propias; sus comisiones no forman parte del precio de desarrollo.';
 const HARDWARE_NOTE = 'El precio corresponde al software. El equipo (hardware) no está incluido y se cotiza por separado.';
+const PURCHASE_ONLY_NOTE = 'Solo compra (pago único); no se ofrece en renta.';
 
-const WEB_ADDONS = [
-  'web-section',
-  'web-internal-page',
-  'web-gallery',
-  'seo-initial',
-  'managed-blog',
-  'advanced-visual-design',
-  'advanced-animations',
-  'whatsapp-button',
-  'facebook-button',
-  'instagram-button',
-  'tiktok-button',
-  'email-button',
-  'contact-form',
-  'quote-form',
-  'whatsapp-widget',
-  'whatsapp-business-api',
-  'crm-integration',
-  'chatbot',
-];
+/** Integraciones con terceros que cualquier paquete web o de software puede sumar. */
+const INTEGRATION_ADDONS = ['whatsapp-business-api', 'crm-integration', 'chatbot'];
+const SOCIAL_BUTTONS = ['facebook-button', 'instagram-button', 'tiktok-button'];
 
 /** Botones de redes sociales que la Web Corporativa trae incluidos. */
 export const CORPORATE_SOCIAL_ITEMS = ['whatsapp-button', 'facebook-button', 'instagram-button', 'tiktok-button'];
 export const CORPORATE_SOCIAL_FEATURE = 'Botones de redes sociales (WhatsApp, Facebook, Instagram y TikTok)';
 
-/** Adicionales documentados de la tienda virtual (ARISE Parte 1, §3.2). */
-const STORE_ADDONS = [
-  'offers-manager',
-  'stripe-payments',
-  'mercadopago-payments',
-  'transfer-proof',
-  'order-editing',
-  'payment-method-change',
-  'order-emails',
-  'bulk-sales',
-  'whatsapp-button',
-  'whatsapp-transfer-notice',
-];
+const items = (...slugs: string[]): SeedPackageItem[] => slugs.map((component) => ({ component }));
 
-/** Adicionales documentados del punto de venta (ARISE Parte 2, §4.2). */
-const POS_ADDONS = [
-  'pos-csv-import-export',
-  'bulk-sales',
-  'offers-manager',
-  'pos-suppliers',
-  'pos-supplier-accounts',
-  'pos-credit-sales',
-  'pos-advanced-history',
-  'pos-returns',
-  'pos-expenses',
-  'pos-payroll',
-  'pos-payroll-advances',
-  'pos-reports',
-  'pos-savings-goals',
-  'pos-users-permissions',
-  'scale',
-];
-
-const STORE_ITEMS: SeedPackageItem[] = [
+const STORE_ITEMS: SeedPackageItem[] = items(
   'store-public-site',
   'store-catalog',
   'store-search-filters',
@@ -367,9 +362,9 @@ const STORE_ITEMS: SeedPackageItem[] = [
   'store-integrity',
   'store-contact-info',
   'store-experience',
-].map((component) => ({ component }));
+);
 
-const POS_ITEMS: SeedPackageItem[] = [
+const POS_ITEMS: SeedPackageItem[] = items(
   'pos-auth',
   'pos-dashboard',
   'pos-products',
@@ -379,7 +374,7 @@ const POS_ITEMS: SeedPackageItem[] = [
   'pos-customers',
   'pos-sales-history',
   'pos-settings',
-].map((component) => ({ component }));
+);
 
 export const seedPackages: SeedPackage[] = [
   {
@@ -387,10 +382,35 @@ export const seedPackages: SeedPackage[] = [
     name: 'Landing Page',
     category: 'web',
     summary: 'Una landing page profesional para presentar tu negocio.',
-    features: ['Una landing page', 'Hasta cuatro secciones', 'Diseño responsive', 'Presentación del negocio', 'Navegación básica', 'Llamado a la acción (CTA) genérico'],
-    notes: ['Solo compra (pago único); no se ofrece en renta.'],
-    items: [{ component: 'landing-page-build' }, { component: 'web-section', quantity: 4 }],
-    addOns: WEB_ADDONS,
+    features: [
+      feature('Landing page con presentación del negocio, navegación y botón de llamado a la acción', 'landing-page-build'),
+      feature('Hasta 4 secciones', 'web-section'),
+      feature('Diseño adaptable a celular, tableta y computadora', 'responsive-design'),
+      feature('Botones de WhatsApp y correo', 'whatsapp-button', 'email-button'),
+      feature('Optimización básica para buscadores', 'basic-seo-tags'),
+      feature('Certificado de seguridad (HTTPS)', 'ssl-certificate'),
+      feature('1 ronda de ajustes al diseño', 'revision-rounds'),
+      feature('Publicación del sitio', 'site-publishing'),
+    ],
+    notes: [PURCHASE_ONLY_NOTE],
+    items: [
+      { component: 'landing-page-build' },
+      { component: 'web-section', quantity: 4 },
+      ...items('whatsapp-button', 'email-button', 'responsive-design', 'basic-seo-tags', 'ssl-certificate', 'site-publishing'),
+      { component: 'revision-rounds', quantity: 1 },
+    ],
+    addOns: [
+      'web-section',
+      'web-gallery',
+      'contact-form',
+      'quote-form',
+      ...SOCIAL_BUTTONS,
+      'whatsapp-widget',
+      'seo-initial',
+      'advanced-visual-design',
+      'advanced-animations',
+      ...INTEGRATION_ADDONS,
+    ],
     recommendedRecurring: ['maintenance-web-basic'],
     price: { mode: 'fixed', basePesos: 3_499 },
   },
@@ -400,21 +420,43 @@ export const seedPackages: SeedPackage[] = [
     category: 'web',
     summary: 'Sitio web corporativo con páginas internas para tu empresa.',
     features: [
-      'Página web corporativa',
-      'Hasta cuatro páginas internas',
-      'Información empresarial',
-      'Presentación de servicios',
-      'Diseño responsive',
-      'Navegación profesional',
-      CORPORATE_SOCIAL_FEATURE,
+      feature('Sitio corporativo: información empresarial, servicios y navegación profesional', 'corporate-site-build'),
+      feature('Página de inicio con hasta 6 secciones', 'web-section'),
+      feature('4 páginas internas', 'web-internal-page'),
+      feature('Formulario de contacto', 'contact-form'),
+      feature('SEO inicial', 'seo-initial'),
+      feature('Botones de WhatsApp, Facebook, Instagram, TikTok y correo', ...CORPORATE_SOCIAL_ITEMS, 'email-button'),
+      feature('Galería', 'web-gallery'),
+      feature('Ubicación con Google Maps', 'google-maps'),
+      feature('Medición de visitas (Google Analytics)', 'web-analytics'),
+      feature('Configuración de 2 cuentas de correo con tu dominio', 'corporate-email-setup'),
+      feature('Página de aviso de privacidad', 'privacy-notice-page'),
+      feature('Diseño adaptable a celular, tableta y computadora', 'responsive-design'),
+      feature('Certificado de seguridad (HTTPS)', 'ssl-certificate'),
+      feature('2 rondas de ajustes al diseño', 'revision-rounds'),
+      feature('Publicación del sitio', 'site-publishing'),
     ],
-    notes: ['Solo compra (pago único); no se ofrece en renta.'],
+    notes: [PURCHASE_ONLY_NOTE, 'Las licencias de correo se pagan al proveedor.'],
     items: [
       { component: 'corporate-site-build' },
+      { component: 'web-section', quantity: 6 },
       { component: 'web-internal-page', quantity: 4 },
-      ...CORPORATE_SOCIAL_ITEMS.map((component) => ({ component })),
+      ...items(...CORPORATE_SOCIAL_ITEMS, 'email-button', 'contact-form', 'web-gallery', 'seo-initial'),
+      ...items('responsive-design', 'ssl-certificate', 'site-publishing', 'google-maps', 'web-analytics', 'privacy-notice-page'),
+      { component: 'corporate-email-setup', quantity: 2 },
+      { component: 'revision-rounds', quantity: 2 },
     ],
-    addOns: WEB_ADDONS,
+    equivalents: ['basic-seo-tags'],
+    addOns: [
+      'web-section',
+      'web-internal-page',
+      'managed-blog',
+      'quote-form',
+      'whatsapp-widget',
+      'advanced-visual-design',
+      'advanced-animations',
+      ...INTEGRATION_ADDONS,
+    ],
     recommendedRecurring: ['maintenance-web-business'],
     price: { mode: 'fixed', basePesos: 7_999 },
   },
@@ -424,18 +466,49 @@ export const seedPackages: SeedPackage[] = [
     category: 'ecommerce',
     summary: 'Tienda en línea con catálogo, carrito, checkout, pagos básicos y seguimiento de pedidos.',
     features: [
-      'Página pública responsive',
-      'Catálogo con búsqueda, filtro y paginación',
-      'Hasta seis productos destacados',
-      'Carrito y checkout',
-      'Recoger en tienda o envío a domicilio',
-      'Pagos por transferencia o efectivo',
-      'Pedidos con estados y consulta segura',
-      'Precios y stock validados en el servidor',
+      feature('Productos ilimitados, con búsqueda, filtros y paginación', 'store-catalog', 'store-search-filters'),
+      feature('Panel de administración: productos, categorías, pedidos y existencias', 'store-admin-panel'),
+      feature('Importación de catálogo desde Excel/CSV, sin límite de productos', 'store-catalog-import'),
+      feature('Carrito y checkout', 'store-cart', 'store-checkout'),
+      feature('Pagos por transferencia o efectivo, con comprobante de transferencia', 'store-basic-payments', 'transfer-proof'),
+      feature('Pedidos con estados, consulta segura y correos automáticos', 'store-orders', 'order-emails'),
+      feature('Recoger en tienda o envío a domicilio', 'store-delivery'),
+      feature('Aviso de transferencia y botón de WhatsApp', 'whatsapp-transfer-notice', 'whatsapp-button'),
+      feature('Página pública responsive con hasta 6 productos destacados', 'store-public-site', 'store-featured-products', 'store-experience'),
+      feature('SEO inicial', 'seo-initial'),
+      feature('Precios y existencias validados en el servidor', 'store-integrity'),
+      feature('Información de contacto, redes y horarios', 'store-contact-info'),
+      feature('Páginas de aviso de privacidad, términos, envíos y devoluciones', 'privacy-notice-page', 'store-terms-page'),
+      feature('Capacitación para usar el panel', 'initial-support'),
+      feature('Certificado de seguridad (HTTPS) y publicación', 'ssl-certificate', 'site-publishing'),
+      feature('2 rondas de ajustes al diseño', 'revision-rounds'),
     ],
-    notes: [PROPOSAL_NOTE, PENDING_ADDONS_NOTE, GATEWAYS_NOTE],
-    items: STORE_ITEMS,
-    addOns: STORE_ADDONS,
+    notes: [PENDING_ADDONS_NOTE, GATEWAYS_NOTE],
+    items: [
+      ...STORE_ITEMS,
+      ...items('store-admin-panel', 'store-catalog-import', 'transfer-proof', 'whatsapp-transfer-notice', 'order-emails', 'whatsapp-button'),
+      ...items('seo-initial', 'ssl-certificate', 'site-publishing', 'privacy-notice-page', 'store-terms-page', 'initial-support'),
+      { component: 'revision-rounds', quantity: 2 },
+    ],
+    equivalents: ['responsive-design', 'basic-seo-tags', 'shopping-cart', 'order-management', 'catalog-filters', 'shipping-options'],
+    addOns: [
+      'stripe-payments',
+      'mercadopago-payments',
+      'payment-gateway',
+      'offers-manager',
+      'order-editing',
+      'payment-method-change',
+      'bulk-sales',
+      'wishlist',
+      'reviews',
+      'cart-recovery',
+      'subscriptions',
+      'advanced-shipping',
+      'custom-reports',
+      ...SOCIAL_BUTTONS,
+      ...INTEGRATION_ADDONS,
+    ],
+    recommendedRecurring: ['maintenance-ecommerce'],
     featured: true,
     price: { mode: 'fixed', basePesos: 14_999 },
   },
@@ -445,18 +518,41 @@ export const seedPackages: SeedPackage[] = [
     category: 'pos',
     summary: 'Software de punto de venta con caja, inventario, tickets, clientes y dashboard.',
     features: [
-      'Inicio de sesión y restricciones de operaciones',
-      'Dashboard de ventas e inventario',
-      'Productos con códigos, categorías, precios de compra y venta, y stock',
-      'Stock mínimo y advertencias',
-      'Venta en caja con escaneo por código',
-      'Impresión de tickets',
-      'Registro de clientes',
-      'Historial de ventas',
+      feature('Productos ilimitados con códigos, categorías, costos, precios y stock', 'pos-products'),
+      feature('Venta en caja con escaneo por código', 'pos-register'),
+      feature('Importación y exportación de catálogo (Excel/CSV), sin límite de productos', 'pos-csv-import-export'),
+      feature('Apertura y corte de caja', 'pos-cash-cut'),
+      feature('Inicio de sesión, varios usuarios y permisos por cajero', 'pos-auth', 'pos-users-permissions'),
+      feature('Inventario con stock mínimo y alertas', 'pos-inventory'),
+      feature('Impresión de tickets', 'pos-tickets'),
+      feature('Devoluciones con ajuste de inventario', 'pos-returns'),
+      feature('Dashboard de ventas e inventario', 'pos-dashboard'),
+      feature('Registro de clientes', 'pos-customers'),
+      feature('Historial de ventas', 'pos-sales-history'),
+      feature('Respaldo automático de la información', 'pos-local-backup'),
+      feature('Configuración esencial', 'pos-settings'),
+      feature('Instalación y capacitación al personal', 'pos-installation', 'initial-support'),
     ],
-    notes: [PROPOSAL_NOTE, PENDING_ADDONS_NOTE, HARDWARE_NOTE],
-    items: POS_ITEMS,
-    addOns: POS_ADDONS,
+    notes: [PENDING_ADDONS_NOTE, HARDWARE_NOTE],
+    items: [
+      ...POS_ITEMS,
+      ...items('pos-users-permissions', 'pos-csv-import-export', 'pos-returns', 'pos-cash-cut', 'pos-local-backup', 'pos-installation', 'initial-support'),
+    ],
+    addOns: [
+      'pos-suppliers',
+      'pos-supplier-accounts',
+      'pos-credit-sales',
+      'pos-advanced-history',
+      'pos-expenses',
+      'pos-payroll',
+      'pos-payroll-advances',
+      'pos-reports',
+      'pos-savings-goals',
+      'offers-manager',
+      'bulk-sales',
+      'scale',
+    ],
+    recommendedRecurring: ['support-pos'],
     featured: true,
     price: { mode: 'fixed', basePesos: 18_000 },
   },
@@ -466,23 +562,63 @@ export const seedPackages: SeedPackage[] = [
     category: 'combo',
     summary: 'Tienda virtual y punto de venta conectados, con una misma base de datos.',
     features: [
-      'Todo lo de la Tienda Virtual',
-      'Todo lo del Punto de Venta',
-      'Catálogo, inventario y clientes compartidos',
-      'Pedidos en línea administrados desde el POS',
+      feature('Todo lo de Tienda Virtual', '@tienda-virtual'),
+      feature('Todo lo del Punto de Venta', '@punto-de-venta'),
+      feature('Un solo catálogo e inventario para tienda y caja, con productos ilimitados', 'unified-dashboard'),
+      feature('Panel unificado de ventas en línea y en mostrador', 'unified-dashboard'),
+      feature('Pedidos en línea administrados desde el POS', 'pos-online-orders'),
+      feature('Reportes de ingresos, costos y ganancias', 'pos-reports'),
+      feature('Gastos administrativos', 'pos-expenses'),
+      feature('Pagos en línea con Mercado Pago', 'mercadopago-payments'),
+      feature('Gestor de ofertas compartido entre tienda y caja', 'offers-manager'),
+      feature('Venta a granel (kg y cantidades decimales)', 'bulk-sales'),
+      feature('Historial avanzado con reimpresión de tickets', 'pos-advanced-history'),
+      feature('Edición de pedidos y cambio de método de pago', 'order-editing', 'payment-method-change'),
+      feature('Una sola capacitación integral', 'initial-support'),
     ],
     notes: [
-      PROPOSAL_NOTE,
       'El catálogo y el inventario compartidos son parte de la solución integrada; esa conexión no se cobra aparte.',
       PENDING_ADDONS_NOTE,
       GATEWAYS_NOTE,
       HARDWARE_NOTE,
     ],
     // Lo propio de la combinación; lo demás llega desde los dos paquetes contenidos (sin duplicados).
-    items: [{ component: 'pos-online-orders' }],
+    // Si un item propio también viene en un paquete contenido, la cantidad del combo reemplaza a la suya.
+    items: items(
+      'pos-online-orders',
+      'pos-reports',
+      'pos-advanced-history',
+      'pos-expenses',
+      'offers-manager',
+      'bulk-sales',
+      'mercadopago-payments',
+      'order-editing',
+      'payment-method-change',
+      'initial-support',
+      'unified-dashboard',
+    ),
     includesPackages: [{ package: 'tienda-virtual' }, { package: 'punto-de-venta' }],
     comboPolicy: { onEssentialRemoval: 'review', onVariantChange: 'review' },
-    addOns: [...new Set([...STORE_ADDONS, ...POS_ADDONS])],
+    equivalents: ['pos-ecommerce-sync', 'payment-gateway'],
+    addOns: [
+      'stripe-payments',
+      'pos-suppliers',
+      'pos-supplier-accounts',
+      'pos-credit-sales',
+      'pos-payroll',
+      'pos-payroll-advances',
+      'pos-savings-goals',
+      'wishlist',
+      'reviews',
+      'cart-recovery',
+      'subscriptions',
+      'advanced-shipping',
+      'custom-reports',
+      ...SOCIAL_BUTTONS,
+      ...INTEGRATION_ADDONS,
+      'scale',
+    ],
+    recommendedRecurring: ['maintenance-ecommerce', 'support-pos'],
     featured: true,
     price: { mode: 'fixed', basePesos: 27_000 },
   },
@@ -491,11 +627,35 @@ export const seedPackages: SeedPackage[] = [
     name: 'Software Personalizado',
     category: 'custom',
     summary: 'Desarrollo a la medida de tu proceso. Se cotiza tras una evaluación técnica.',
-    features: ['Evaluación técnica del proceso', 'Especificación del alcance', 'Desarrollo a la medida'],
+    features: [
+      feature('Evaluación técnica del proceso', 'technical-assessment'),
+      feature('Especificación del alcance por escrito', 'scope-specification'),
+      feature('Desarrollo a la medida', 'custom-software'),
+      feature('Panel de administración', 'custom-admin-panel'),
+      feature('Usuarios con roles y permisos', 'custom-roles'),
+      feature('Documentación de uso y técnica', 'technical-docs'),
+      feature('Revisiones de avance por etapa', 'progress-reviews'),
+      feature('Capacitación', 'initial-support'),
+      feature('Certificado de seguridad (HTTPS) y publicación', 'ssl-certificate', 'site-publishing'),
+    ],
     notes: [
       'El precio es un mínimo: el alcance se define con una evaluación técnica y una especificación.',
       'La renta mensual se cotiza según el alcance.',
     ],
+    items: items(
+      'technical-assessment',
+      'scope-specification',
+      'custom-software',
+      'custom-admin-panel',
+      'custom-roles',
+      'technical-docs',
+      'progress-reviews',
+      'initial-support',
+      'ssl-certificate',
+      'site-publishing',
+    ),
+    equivalents: ['custom-software'],
+    addOns: INTEGRATION_ADDONS,
     price: { mode: 'starting_at', basePesos: 39_000 },
   },
   {
@@ -504,8 +664,14 @@ export const seedPackages: SeedPackage[] = [
     category: 'custom',
     pricingType: 'evaluation',
     summary: 'Cuéntanos qué necesitas y un asesor te recomienda la mejor opción.',
-    features: ['Asesoría comercial', 'Recomendación de solución', 'Cotización a la medida'],
+    features: [
+      feature('Asesoría comercial', 'advisory-session'),
+      feature('Recomendación de solución', 'solution-recommendation'),
+      feature('Cotización a la medida', 'tailored-quote'),
+    ],
     notes: ['No genera un precio automático: un asesor revisa tu necesidad y te contacta.'],
+    items: items('advisory-session', 'solution-recommendation', 'tailored-quote'),
+    addOns: [],
     price: { mode: 'pending' },
   },
 ];
@@ -619,6 +785,25 @@ const requiresComponent = (subject: string, targets: string[], message: string):
   message,
 });
 
+/** Módulos ARISE de la tienda virtual (Parte 1, §3.2) que solo existen con una tienda. */
+const STORE_MODULES = ['stripe-payments', 'mercadopago-payments', 'transfer-proof', 'order-editing', 'payment-method-change', 'order-emails', 'whatsapp-transfer-notice'];
+
+/** Módulos ARISE del punto de venta (Parte 2, §4.2) que solo existen con un POS. */
+const POS_MODULES = [
+  'pos-csv-import-export',
+  'pos-suppliers',
+  'pos-supplier-accounts',
+  'pos-credit-sales',
+  'pos-advanced-history',
+  'pos-returns',
+  'pos-expenses',
+  'pos-payroll',
+  'pos-payroll-advances',
+  'pos-reports',
+  'pos-savings-goals',
+  'pos-users-permissions',
+];
+
 const WEB_OR_STORE ='Disponible al contratar una página web o tienda virtual.';
 const STORE_ONLY = 'Disponible al contratar una tienda virtual.';
 
@@ -629,7 +814,7 @@ export const seedRules: SeedRule[] = [
   ...['whatsapp-button', 'facebook-button', 'instagram-button', 'tiktok-button', 'email-button', 'contact-form', 'quote-form', 'whatsapp-widget'].map(
     (slug) => requires(slug, ['web', 'ecommerce'], WEB_OR_STORE),
   ),
-  ...['ecommerce-product', 'payment-gateway', 'advanced-shipping', 'subscriptions', 'wishlist', 'cart-recovery', 'reviews', 'custom-reports'].map(
+  ...['payment-gateway', 'advanced-shipping', 'subscriptions', 'wishlist', 'cart-recovery', 'reviews', 'custom-reports'].map(
     (slug) => requires(slug, ['ecommerce'], STORE_ONLY),
   ),
   requires('pos-ecommerce-sync', ['ecommerce'], 'La sincronización requiere una tienda virtual.', 'pos-ecommerce-sync-requires-ecommerce'),
@@ -638,15 +823,12 @@ export const seedRules: SeedRule[] = [
   requires('maintenance-web-basic', ['web'], 'Plan de mantenimiento para sitios web.'),
   requires('maintenance-web-business', ['web'], 'Plan de mantenimiento para sitios web.'),
   requires('maintenance-ecommerce', ['ecommerce'], 'Plan de mantenimiento para tiendas virtuales.'),
-  requires('support-pos', ['pos'], 'Soporte para paquetes de punto de venta.'),
+  // Se conserva la clave original: el seed actualiza la regla existente en vez de crear otra.
+  requires('support-pos', ['pos', 'custom'], 'Soporte para punto de venta o software a la medida.', 'support-pos-requires-pos'),
 
   // Módulos ARISE: solo con el paquete al que pertenecen (la Solución Combinada contiene ambos).
-  ...STORE_ADDONS.filter((slug) => slug !== 'whatsapp-button' && slug !== 'offers-manager' && slug !== 'bulk-sales').map((slug) =>
-    requires(slug, ['ecommerce'], STORE_ONLY),
-  ),
-  ...POS_ADDONS.filter((slug) => slug !== 'scale' && slug !== 'offers-manager' && slug !== 'bulk-sales').map((slug) =>
-    requires(slug, ['pos'], 'Disponible al contratar un punto de venta.'),
-  ),
+  ...STORE_MODULES.map((slug) => requires(slug, ['ecommerce'], STORE_ONLY)),
+  ...POS_MODULES.map((slug) => requires(slug, ['pos'], 'Disponible al contratar un punto de venta.')),
   ...['offers-manager', 'bulk-sales'].map((slug) => requires(slug, ['ecommerce', 'pos'], 'Disponible al contratar una tienda virtual o un punto de venta.')),
   requires('pos-online-orders', ['ecommerce'], 'Los pedidos en línea requieren una tienda virtual conectada.'),
   requiresComponent('pos-supplier-accounts', ['pos-suppliers'], 'Cuentas de proveedores requiere el módulo Proveedores.'),

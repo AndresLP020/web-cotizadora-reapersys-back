@@ -100,6 +100,82 @@ export interface PackageMappingContext {
   price: Doc<PackagePrice> | undefined;
   /** Paquetes contenidos (para combos), por id. */
   packagesById: Map<string, Doc<Package>>;
+  /** Valor informativo de lo incluido (ver includedValueCents). */
+  includedValueCents?: number;
+}
+
+/** Item efectivo del paquete, por id de componente. */
+export interface EffectiveItem {
+  componentId: string;
+  quantity: number;
+  removable: boolean;
+}
+
+/** Items de un paquete simple con sus variantes por defecto (o las indicadas). */
+function packageItems(pkg: Pick<Package, 'items' | 'variantGroups'>, variants: Record<string, string> = {}): PackageItem[] {
+  return [
+    ...pkg.items,
+    ...pkg.variantGroups.flatMap((group) => group.options.find((o) => o.key === (variants[group.key] ?? group.defaultOption))?.items ?? []),
+  ];
+}
+
+function variantsOf(raw: unknown): Record<string, string> {
+  // Con lean() el Map de Mongoose llega como objeto plano.
+  return raw instanceof Map ? Object.fromEntries(raw as Map<string, string>) : { ...(raw as Record<string, string>) };
+}
+
+/**
+ * Lo que el paquete incluye de verdad. En un combo: sus paquetes contenidos (con las variantes
+ * fijadas) y, encima, sus items propios, cuya cantidad REEMPLAZA la de los contenidos (misma regla que el motor).
+ */
+export function effectiveItems(pkg: Doc<Package>, packagesById: Map<string, Doc<Package>>): Map<string, EffectiveItem> {
+  const result = new Map<string, EffectiveItem>();
+  const add = (items: PackageItem[], replace: boolean) => {
+    for (const item of items) {
+      const id = item.component.toString();
+      const existing = result.get(id);
+      if (existing && !replace) {
+        existing.quantity += item.quantity;
+        existing.removable &&= item.removable;
+      } else {
+        result.set(id, { componentId: id, quantity: item.quantity, removable: item.removable });
+      }
+    }
+  };
+  for (const included of pkg.includesPackages ?? []) {
+    const inner = packagesById.get(included.package.toString());
+    if (inner) add(packageItems(inner, variantsOf(included.variants)), false);
+  }
+  add(packageItems(pkg), (pkg.includesPackages ?? []).length > 0);
+  return result;
+}
+
+/** Suma informativa de lo incluido que también se vende por separado con precio fijo publicado. */
+export function includedValueCents(
+  items: Iterable<EffectiveItem>,
+  componentsById: Map<string, Pick<Component, 'publicVisible' | 'status'>>,
+  prices: Map<string, Pick<ComponentPrice, 'mode' | 'saleCents'>>,
+): number {
+  const amounts: number[] = [];
+  for (const item of items) {
+    const component = componentsById.get(item.componentId);
+    const price = prices.get(item.componentId);
+    if (!component?.publicVisible || component.status !== 'active' || price?.mode !== 'fixed' || price.saleCents === null) continue;
+    amounts.push(price.saleCents * item.quantity);
+  }
+  return add(...amounts);
+}
+
+/**
+ * «Puedes agregar»: los complementos del paquete sin lo que ya incluye ni lo que cubre.
+ * Excepción: un cuantificable incluido (maxQuantity > 1) se ofrece para unidades extra.
+ */
+export function offerableAddOns<T extends Pick<PublicComponent, 'slug' | 'maxQuantity'>>(
+  addOns: T[],
+  includedSlugs: Set<string>,
+  equivalentSlugs: Set<string>,
+): T[] {
+  return addOns.filter((addOn) => !equivalentSlugs.has(addOn.slug) && (!includedSlugs.has(addOn.slug) || addOn.maxQuantity > 1));
 }
 
 export function toPublicPackage(pkg: Doc<Package>, ctx: PackageMappingContext): PublicPackage {
@@ -126,6 +202,7 @@ export function toPublicPackage(pkg: Doc<Package>, ctx: PackageMappingContext): 
     featured: pkg.featured,
     sortOrder: pkg.sortOrder,
     subscription: subscriptionOffer(pkg, ctx.price),
+    includedValueCents: ctx.includedValueCents ?? 0,
   };
 }
 
@@ -149,8 +226,10 @@ export function subscriptionOffer(pkg: Pick<Package, 'rentalProfile'>, price: Pi
 }
 
 export interface PackageDetailContext extends PackageMappingContext {
+  /** Componentes de los items (propios y de los paquetes contenidos), equivalentes y renta. */
   componentsById: Map<string, Doc<Component>>;
   recommendedRecurring: PublicComponent[];
+  /** Complementos del paquete; aquí se les quita lo incluido y lo equivalente. */
   addOns: PublicComponent[];
 }
 
@@ -160,7 +239,14 @@ function toPublicItems(items: PackageItem[], componentsById: Map<string, Doc<Com
     if (!component) return [];
     return [
       {
-        component: { slug: component.slug, name: component.name, unit: component.unit },
+        component: {
+          slug: component.slug,
+          name: component.name,
+          unit: component.unit,
+          includedLabel: component.includedLabel,
+          highlights: [...(component.highlights ?? [])],
+          maxQuantity: component.maxQuantity,
+        },
         quantity: item.quantity,
         removable: item.removable,
       },
@@ -182,6 +268,10 @@ export function toPublicPackageDetail(pkg: Doc<Package>, ctx: PackageDetailConte
     })),
   }));
 
+  const slugOf = (id: { toString(): string }) => ctx.componentsById.get(id.toString())?.slug;
+  const includedSlugs = new Set([...effectiveItems(pkg, ctx.packagesById).keys()].map(slugOf).filter((s): s is string => Boolean(s)));
+  const equivalents = (pkg.equivalents ?? []).map(slugOf).filter((s): s is string => Boolean(s));
+
   return {
     ...toPublicPackage(pkg, ctx),
     pricingType: pkg.pricingType,
@@ -190,13 +280,12 @@ export function toPublicPackageDetail(pkg: Doc<Package>, ctx: PackageDetailConte
     includedPackages: pkg.includesPackages.flatMap((included) => {
       const target = ctx.packagesById.get(included.package.toString());
       if (!target) return [];
-      // Con lean() el Map de Mongoose llega como objeto plano.
-      const raw: unknown = included.variants;
-      const variants: Record<string, string> = raw instanceof Map ? Object.fromEntries(raw as Map<string, string>) : { ...(raw as Record<string, string>) };
-      return [{ slug: target.slug, name: target.name, variants }];
+      const variants = variantsOf(included.variants);
+      return [{ slug: target.slug, name: target.name, variants, items: toPublicItems(packageItems(target, variants), ctx.componentsById) }];
     }),
     recommendedRecurring: ctx.recommendedRecurring,
-    addOns: ctx.addOns,
+    addOns: offerableAddOns(ctx.addOns, includedSlugs, new Set(equivalents)),
+    equivalents,
     subscriptionIncludedServices: pkg.rentalProfile?.enabled
       ? [...pkg.rentalProfile.services, ...pkg.rentalProfile.coveredComponents].flatMap((id) => {
           const component = ctx.componentsById.get(id.toString());

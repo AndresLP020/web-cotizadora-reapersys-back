@@ -34,6 +34,8 @@ export interface EngineComponent {
   taxable: boolean;
   maxQuantity: number;
   exclusiveGroup?: string;
+  /** Nombre cuando viene incluido en un paquete. */
+  includedLabel?: string;
   price: (EnginePriceRef & { mode: PriceMode; saleCents: number | null }) | null;
 }
 
@@ -74,8 +76,10 @@ export interface EnginePackage {
   price: EnginePackagePrice | null;
   /** Mantenimiento que se cobra cada mes junto con la compra del paquete. */
   recommendedRecurringIds: string[];
-  /** Complementos opcionales compatibles; vacío o ausente = cualquier complemento público. */
+  /** Complementos opcionales compatibles: solo estos se aceptan como adicionales del paquete. */
   addOnIds?: string[];
+  /** Componentes que el paquete ya cubre aunque no estén en items: no se aceptan como adicionales. */
+  equivalentIds?: string[];
   /** Suscripción mensual; null si el paquete no se ofrece en renta. */
   rental: EnginePackageRental | null;
 }

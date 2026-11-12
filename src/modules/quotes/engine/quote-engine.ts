@@ -18,6 +18,7 @@ import {
   type SubscriptionPlanOption,
   type SubscriptionSummary,
 } from './engine.types';
+import { INTEGRATION_SLUGS, recurringApplies } from './recurring-policy';
 
 interface IncludedEntry {
   component: EngineComponent;
@@ -33,12 +34,15 @@ interface IncludedEntry {
  * Motor de cotización de ReaperSys. Determinista y sin efectos secundarios.
  *
  * Reglas comerciales:
- *  1. Cada componente adicional se cobra por las unidades que EXCEDEN lo incluido.
+ *  1. Cada componente adicional se cobra por las unidades que EXCEDEN lo incluido. Solo los
+ *     cuantificables (maxQuantity > 1) admiten unidades extra de algo incluido.
  *  2. Lo incluido nunca se cobra de nuevo; el ahorro de un combo es informativo (no se resta otra vez).
- *  3. Las dependencias se validan con compatibility_rules (block / review). Si el paquete define
- *     sus complementos compatibles (addOnIds), no se acepta ningún otro.
+ *     En un combo, la cantidad de sus items propios reemplaza la de sus paquetes contenidos.
+ *  3. Las dependencias se validan con compatibility_rules (block / review). Con paquete, solo se
+ *     aceptan sus complementos (addOnIds), nunca lo incluido ni lo que el paquete ya cubre (equivalentes).
  *  4. Precios pendientes, "desde", evaluación o cambios en combos envían a revisión (cotización personalizada).
- *  5. Los recurrentes se calculan aparte y nunca se suman al total de implementación.
+ *  5. Los recurrentes se calculan aparte y nunca se suman al total de implementación. Solo se
+ *     aceptan los que aplican al tipo de paquete; en renta, el mantenimiento ya va en la mensualidad.
  *  6. En suscripción, el paquete no se cobra: se cobra la mensualidad (plazo mínimo) y, de contado,
  *     el pago inicial y los complementos. Los cambios al paquete obligan a ajustar la mensualidad.
  *  7. Todo paquete lleva dominio y hosting anuales, aparte del total (en suscripción, en el primer pago).
@@ -66,12 +70,15 @@ export function calculateQuote(catalog: CatalogSnapshot, selection: QuoteSelecti
     review('subscription_adjustment', `${what} en la suscripción requiere ajustar la mensualidad.`, slug);
 
   const included = new Map<string, IncludedEntry>();
-  const addItems = (items: EngineItem[], owner: EnginePackage) => {
+  /** `replace`: los items propios de un combo fijan la cantidad en vez de sumarse a la de sus paquetes. */
+  const addItems = (items: EngineItem[], owner: EnginePackage, replace = false) => {
     for (const item of items) {
       const component = catalog.components.get(item.componentId);
       if (!component) continue;
       const existing = included.get(component.id);
-      if (existing) {
+      if (existing && replace) {
+        Object.assign(existing, { quantity: item.quantity, removable: item.removable, essential: item.essential, owner });
+      } else if (existing) {
         existing.quantity += item.quantity;
         existing.removable &&= item.removable;
         existing.essential ||= item.essential;
@@ -157,9 +164,8 @@ export function calculateQuote(catalog: CatalogSnapshot, selection: QuoteSelecti
         }
       }
     } else {
-      // Combo: incluye lo propio de la combinación y los paquetes contenidos con sus variantes fijadas.
+      // Combo: los paquetes contenidos con sus variantes fijadas y, encima, lo propio de la combinación.
       const allowedKeys: string[] = [];
-      addItems(pkg.items, pkg);
       for (const ref of pkg.includesPackages) {
         const inner = catalog.packages.get(ref.packageId);
         if (!inner) continue;
@@ -182,6 +188,7 @@ export function calculateQuote(catalog: CatalogSnapshot, selection: QuoteSelecti
           }
         }
       }
+      addItems(pkg.items, pkg, true);
       assertKnownVariantKeys(selection.variants, allowedKeys);
     }
   } else {
@@ -239,8 +246,9 @@ export function calculateQuote(catalog: CatalogSnapshot, selection: QuoteSelecti
   const selected = new Set<string>([...included.values()].filter((e) => !e.removed).map((e) => e.component.id));
   for (const id of rental?.includedComponentIds ?? []) selected.add(id);
   const chosenAddOns: EngineComponent[] = [];
-  // Si el paquete define sus complementos compatibles, solo esos se aceptan.
+  // Con paquete, solo se aceptan sus complementos; nunca lo que ya cubre.
   const offered = new Set(pkg?.addOnIds ?? []);
+  const equivalents = new Set(pkg?.equivalentIds ?? []);
 
   for (const { slug, quantity } of uniqueBy(selection.components, (c) => c.slug, 'complemento')) {
     const component = catalog.componentsBySlug.get(slug);
@@ -250,10 +258,10 @@ export function calculateQuote(catalog: CatalogSnapshot, selection: QuoteSelecti
 
     const entry = included.get(component.id);
     if (entry?.removed) throw new QuoteSelectionError(`${component.name} fue retirado; no puede agregarse a la vez.`);
-    if (!component.publicVisible && !entry) throw new QuoteSelectionError(`${component.name} no se ofrece como complemento.`);
-    if (!entry && pkg && offered.size > 0 && !offered.has(component.id)) {
-      throw new QuoteSelectionError(`${component.name} no se ofrece con ${pkg.name}.`);
-    }
+    if (pkg && equivalents.has(component.id)) throw new QuoteSelectionError(`${component.name} ya está cubierto por ${pkg.name}.`);
+    if (pkg && entry && component.maxQuantity <= 1) throw new QuoteSelectionError(`${component.name} ya está incluido en ${pkg.name}.`);
+    if (!component.publicVisible) throw new QuoteSelectionError(`${component.name} no se ofrece como complemento.`);
+    if (pkg && !offered.has(component.id)) throw new QuoteSelectionError(`${component.name} no se ofrece con ${pkg.name}.`);
 
     const includedQty = entry?.quantity ?? 0;
     const chargeable = Math.max(0, quantity - includedQty);
@@ -311,22 +319,22 @@ export function calculateQuote(catalog: CatalogSnapshot, selection: QuoteSelecti
   const infrastructureCents = infrastructurePending ? null : add(...infrastructure.map((c) => c.price!.saleCents!));
 
   // ------------------------------------------------------------ servicios recurrentes
-  // En compra, el mantenimiento del paquete se cobra siempre. En renta ya va dentro de la mensualidad.
-  const MAINTENANCE = new Set(['maintenance-web-basic', 'maintenance-web-business', 'maintenance-ecommerce', 'support-pos']);
-  const annexed = !rental && pkg
-    ? pkg.recommendedRecurringIds.flatMap((id) => {
-        const component = catalog.components.get(id);
-        return component && MAINTENANCE.has(component.slug) ? [component.slug] : [];
-      })
-    : [];
+  // Ninguno se anexa solo: el cliente elige (el cotizador preselecciona el recomendado del paquete).
   const recurring: RecurringLine[] = [];
   const chosenRecurring: EngineComponent[] = [];
-  for (const slug of [...new Set([...annexed, ...unique(selection.recurring, 'servicio recurrente')])]) {
+  const hasIntegration = [...selected].some((id) => INTEGRATION_SLUGS.includes(catalog.components.get(id)?.slug ?? ''));
+  for (const slug of unique(selection.recurring, 'servicio recurrente')) {
     const component = catalog.componentsBySlug.get(slug);
     if (!component || !component.active || !component.publicVisible) throw new QuoteSelectionError(`El servicio "${slug}" no está disponible.`);
     if (component.billing === 'one_time') throw new QuoteSelectionError(`${component.name} no es un servicio recurrente.`);
     if (rental?.includedComponentIds.includes(component.id)) throw new QuoteSelectionError(`${component.name} ya está incluido en la suscripción.`);
     if (INFRASTRUCTURE_SLUGS.includes(slug)) throw new QuoteSelectionError(`${component.name} ya va con el paquete, junto con el dominio y hosting.`);
+    const applies = recurringApplies(slug, { category: pkg?.category ?? null, renting: rental !== null, hasIntegration });
+    if (!applies.ok) {
+      throw new QuoteSelectionError(
+        applies.reason === 'included_in_rental' ? `${component.name}: el mantenimiento ya está incluido en tu renta.` : `${component.name} no aplica a ${pkg!.name}.`,
+      );
+    }
     selected.add(component.id);
     chosenRecurring.push(component);
 
@@ -472,7 +480,7 @@ export function calculateQuote(catalog: CatalogSnapshot, selection: QuoteSelecti
 
   const includedItems: IncludedItem[] = [...included.values()].map((entry) => ({
     componentSlug: entry.component.slug,
-    name: entry.component.name,
+    name: entry.component.includedLabel ?? entry.component.name,
     quantity: entry.quantity,
     fromPackage: entry.owner.slug,
     removable: entry.removable,
