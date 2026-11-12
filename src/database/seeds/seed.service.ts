@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { type Model, Types, type UpdateQuery } from 'mongoose';
 import { fromWholePesos } from '../../common/money/money';
+import { seedNfcDesigns, seedNfcPriceTiers, seedOccasions, seedTemplates } from '../../modules/digital/digital.seed-data';
+import { DigitalTemplate } from '../../modules/digital/schemas/digital-template.schema';
+import { NfcDesign } from '../../modules/digital/schemas/nfc-design.schema';
+import { NfcPriceTier } from '../../modules/digital/schemas/nfc-price-tier.schema';
+import { Occasion } from '../../modules/digital/schemas/occasion.schema';
 import { SYSTEM_ACTOR } from '../../modules/audit/audit.service';
 import { Category } from '../../modules/catalog/schemas/category.schema';
 import { CompatibilityRule } from '../../modules/catalog/schemas/compatibility-rule.schema';
@@ -47,6 +52,11 @@ export interface SeedReport {
   infrastructureUpgrade: number;
   /** Paquetes, componentes y reglas existentes alineados con el contenido vigente de cada paquete. */
   catalogSync: number;
+  /** Catálogo digital: ocasiones, plantillas (en borrador), diseños NFC (en borrador) y tramos de precio NFC. */
+  digitalOccasions: number;
+  digitalTemplates: number;
+  nfcDesigns: number;
+  nfcPriceTiers: number;
 }
 
 /** Servicios que «Hosting» y «Dominio» anuales reemplazan. */
@@ -86,6 +96,10 @@ export class SeedService {
     @InjectModel(BusinessSettings.name) private readonly settings: Model<BusinessSettings>,
     @InjectModel(OperatingCost.name) private readonly operatingCosts: Model<OperatingCost>,
     private readonly pricing: PricingService,
+    @InjectModel(Occasion.name) private readonly occasions: Model<Occasion>,
+    @InjectModel(DigitalTemplate.name) private readonly digitalTemplates: Model<DigitalTemplate>,
+    @InjectModel(NfcDesign.name) private readonly nfcDesigns: Model<NfcDesign>,
+    @InjectModel(NfcPriceTier.name) private readonly nfcPriceTiers: Model<NfcPriceTier>,
   ) {}
 
   async run(): Promise<SeedReport> {
@@ -103,6 +117,10 @@ export class SeedService {
       retiredPackages: 0,
       infrastructureUpgrade: 0,
       catalogSync: 0,
+      digitalOccasions: 0,
+      digitalTemplates: 0,
+      nfcDesigns: 0,
+      nfcPriceTiers: 0,
     };
     const missing = trusted({ $exists: false });
 
@@ -309,6 +327,24 @@ export class SeedService {
 
     if (upgradeInfrastructure) report.infrastructureUpgrade = await this.upgradeInfrastructure(componentId);
     report.catalogSync = await this.syncCatalog(packageContent, componentId);
+
+    // Catálogo digital: solo se crea lo que falta; nada queda publicado (no tienen demo).
+    for (const [index, occasion] of seedOccasions.entries()) {
+      report.digitalOccasions += await this.insertIfAbsent(this.occasions, { slug: occasion.slug }, { ...occasion, sortOrder: (index + 1) * 10 });
+    }
+    for (const [index, template] of seedTemplates.entries()) {
+      report.digitalTemplates += await this.insertIfAbsent(
+        this.digitalTemplates,
+        { slug: template.slug },
+        { ...template, demoUrl: '', priceCents: null, status: 'draft', featured: false, sortOrder: (index + 1) * 10, preview: {} },
+      );
+    }
+    for (const [index, design] of seedNfcDesigns.entries()) {
+      report.nfcDesigns += await this.insertIfAbsent(this.nfcDesigns, { slug: design.slug }, { ...design, demoUrl: '', status: 'draft', sortOrder: (index + 1) * 10, preview: {} });
+    }
+    for (const tier of seedNfcPriceTiers) {
+      report.nfcPriceTiers += await this.insertIfAbsent(this.nfcPriceTiers, { quantity: tier.quantity }, tier);
+    }
 
     this.logger.log(`Seed completado: ${JSON.stringify(report)}`);
     return report;

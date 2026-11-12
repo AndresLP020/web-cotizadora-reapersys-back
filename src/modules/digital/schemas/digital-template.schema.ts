@@ -1,63 +1,40 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { type HydratedDocument, Types } from 'mongoose';
+import type { HydratedDocument } from 'mongoose';
+import { FIELD_KEYS, type FieldKey, HEX_COLOR, PRODUCT_STATUSES, type ProductStatus, SLUG_PATTERN } from '../digital.constants';
+import { LinkPreview, LinkPreviewSchema } from './link-preview.schema';
 
-/** Líneas de producto: detalles digitales personalizables y tarjetas NFC de presentación. */
-export const DIGITAL_KINDS = ['digital_gift', 'nfc_card'] as const;
-export type DigitalKind = (typeof DIGITAL_KINDS)[number];
-
-/** Ocasión o uso de cada plantilla; cada línea de producto admite las suyas. */
-export const OCCASIONS_BY_KIND: Record<DigitalKind, readonly string[]> = {
-  digital_gift: ['birthday', 'partner', 'friendship', 'anniversary', 'other'],
-  nfc_card: ['business', 'professional', 'personal'],
-};
-export const DIGITAL_OCCASIONS = [...new Set(Object.values(OCCASIONS_BY_KIND).flat())];
-
-export const TEMPLATE_STATUSES = ['active', 'inactive'] as const;
-export type TemplateStatus = (typeof TEMPLATE_STATUSES)[number];
-
-/** Vista previa del enlace (como la que muestra WhatsApp), leída de las etiquetas Open Graph de la demo. */
+/** Dato que la plantilla pide al cliente. `max` = máximo de fotos, o largo máximo en los de texto. */
 @Schema({ _id: false })
-export class LinkPreview {
-  @Prop({ trim: true, maxlength: 200 })
-  title?: string;
+export class TemplateField {
+  @Prop({ required: true, enum: FIELD_KEYS })
+  key!: FieldKey;
 
-  @Prop({ trim: true, maxlength: 400 })
-  description?: string;
+  @Prop({ default: false })
+  required!: boolean;
 
-  @Prop({ trim: true, maxlength: 120 })
-  siteName?: string;
-
-  /** Imagen en GridFS (bucket digital_template_images). */
-  @Prop({ type: Types.ObjectId })
-  imageFileId?: Types.ObjectId;
-
-  @Prop({ trim: true, maxlength: 40 })
-  imageContentType?: string;
-
-  /** og = leída de la página; upload = captura subida desde el panel (tiene prioridad). */
-  @Prop({ enum: ['og', 'upload'] })
-  imageSource?: 'og' | 'upload';
-
-  @Prop()
-  fetchedAt?: Date;
-
-  /** Motivo si la última lectura falló (la plantilla se guarda igual). */
-  @Prop({ trim: true, maxlength: 300 })
-  error?: string;
+  @Prop({ min: 1, max: 1000 })
+  max?: number;
 }
-const LinkPreviewSchema = SchemaFactory.createForClass(LinkPreview);
+const TemplateFieldSchema = SchemaFactory.createForClass(TemplateField);
 
-/**
- * Plantilla del catálogo de productos digitales: una página de demostración que el cliente
- * personaliza (nombres, mensajes) o, en NFC, el diseño de la página de contacto de la tarjeta.
- */
+/** Colores de la miniatura dibujada cuando la plantilla no tiene imagen. */
+@Schema({ _id: false })
+export class TemplateColors {
+  @Prop({ required: true, match: HEX_COLOR }) bg!: string;
+  @Prop({ required: true, match: HEX_COLOR }) accent!: string;
+  @Prop({ required: true, match: HEX_COLOR }) ink!: string;
+  /** Fondo tenue de la zona de vista previa de la tarjeta del catálogo. */
+  @Prop({ required: true, match: HEX_COLOR }) stage!: string;
+}
+const TemplateColorsSchema = SchemaFactory.createForClass(TemplateColors);
+
+export const DEFAULT_TEMPLATE_COLORS: TemplateColors = { bg: '#3B1424', accent: '#F4A6B8', ink: '#FFE4EA', stage: '#FCE7EC' };
+
+/** Plantilla de detalle digital: una página de demostración que el cliente personaliza. */
 @Schema({ collection: 'digital_templates', timestamps: true })
 export class DigitalTemplate {
-  @Prop({ required: true, unique: true, trim: true, lowercase: true, match: /^[a-z0-9-]{2,80}$/ })
+  @Prop({ required: true, unique: true, trim: true, lowercase: true, match: SLUG_PATTERN })
   slug!: string;
-
-  @Prop({ required: true, enum: DIGITAL_KINDS, index: true })
-  kind!: DigitalKind;
 
   @Prop({ required: true, trim: true, maxlength: 120 })
   name!: string;
@@ -65,26 +42,29 @@ export class DigitalTemplate {
   @Prop({ trim: true, maxlength: 400 })
   description?: string;
 
-  @Prop({ required: true, enum: DIGITAL_OCCASIONS })
-  occasion!: string;
-
-  /** Página de demostración (se abre en otra pestaña). */
-  @Prop({ required: true, trim: true, maxlength: 500 })
+  /** Página de demostración (https). Vacía = aún no se puede publicar. */
+  @Prop({ trim: true, maxlength: 500, default: '' })
   demoUrl!: string;
 
-  /** Precio por plantilla (detalles) o por tarjeta (NFC), en centavos. null = «Por cotizar». */
+  /** Slugs de las ocasiones (colección digital_occasions). */
+  @Prop({ type: [String], default: [] })
+  occasions!: string[];
+
+  @Prop({ type: [TemplateFieldSchema], default: [] })
+  fields!: TemplateField[];
+
+  /** Precio en centavos. null = «Por cotizar». */
   @Prop({ type: Number, default: null, min: 0 })
   priceCents!: number | null;
 
-  /** Datos que el cliente llena al pedirla: «Nombre de ella», «Mensaje especial», «Puesto»… */
-  @Prop({ type: [String], default: [] })
-  customizableFields!: string[];
+  @Prop({ type: TemplateColorsSchema, default: () => ({ ...DEFAULT_TEMPLATE_COLORS }) })
+  colors!: TemplateColors;
 
   @Prop({ type: LinkPreviewSchema, default: () => ({}) })
   preview!: LinkPreview;
 
-  @Prop({ required: true, enum: TEMPLATE_STATUSES, default: 'active' })
-  status!: TemplateStatus;
+  @Prop({ required: true, enum: PRODUCT_STATUSES, default: 'draft' })
+  status!: ProductStatus;
 
   @Prop({ default: false })
   featured!: boolean;
@@ -99,4 +79,5 @@ export class DigitalTemplate {
 export type DigitalTemplateDocument = HydratedDocument<DigitalTemplate>;
 export const DigitalTemplateSchema = SchemaFactory.createForClass(DigitalTemplate);
 
-DigitalTemplateSchema.index({ status: 1, kind: 1, featured: -1, sortOrder: 1 });
+DigitalTemplateSchema.index({ status: 1, sortOrder: 1 });
+DigitalTemplateSchema.index({ status: 1, occasions: 1 });

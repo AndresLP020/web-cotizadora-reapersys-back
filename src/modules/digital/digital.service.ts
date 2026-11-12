@@ -1,82 +1,62 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import mongoose, { type Connection, type Model, Types } from 'mongoose';
-import { formatMXN } from '../../common/money/money';
-import { containsText } from '../../database/query-operators';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { type Model, Types } from 'mongoose';
+import { containsText, inValues, trusted } from '../../database/query-operators';
 import { actorOf, type AuthenticatedUser } from '../../security/auth.types';
 import { pageOf, type Paged } from '../admin/admin.dto';
 import { AuditService } from '../audit/audit.service';
-import { LeadsService, type RequestContext } from '../leads/leads.service';
-import {
-  type CreateDigitalOrderDto,
-  type CreateTemplateDto,
-  DIGITAL_ORDER_CONSENT_VERSION,
-  type TemplateListQuery,
-  type UpdateTemplateDto,
-} from './digital.dto';
-import { downloadPreviewImage, fetchPreviewMeta, IMAGE_TYPES, LinkPreviewError, MAX_IMAGE_BYTES } from './link-preview';
-import { DigitalTemplate, type DigitalKind, OCCASIONS_BY_KIND } from './schemas/digital-template.schema';
+import type { CreateOccasionDto, CreateTemplateDto, ProductListQuery, UpdateOccasionDto, UpdateTemplateDto } from './digital.dto';
+import { assetPath, demoPathOf, ProductImagesService, type UploadedImage } from './product-images.service';
+import { DigitalTemplate } from './schemas/digital-template.schema';
+import { Occasion } from './schemas/occasion.schema';
 
 type Doc<T> = T & { _id: Types.ObjectId };
 
-export interface UploadedImage {
-  buffer: Buffer;
-  mimetype: string;
-  size: number;
+export function slugify(text: string, fallback = 'plantilla'): string {
+  return (
+    text
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 70) || fallback
+  );
 }
 
-const KIND_LABELS: Record<DigitalKind, string> = { digital_gift: 'Detalle digital', nfc_card: 'Tarjetas NFC' };
+const templateBase = (slug: string) => `/digital-templates/${slug}`;
 
-/** Tipo real de la imagen por sus primeros bytes (no se confía en el tipo declarado). */
-export function sniffImageType(buffer: Buffer): string | null {
-  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
-  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
-  if (buffer.length >= 6 && /^GIF8[79]a$/.test(buffer.toString('ascii', 0, 6))) return 'image/gif';
-  return null;
-}
-
-export function slugify(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 70) || 'plantilla';
-}
-
-function imagePath(t: Doc<DigitalTemplate>): string | null {
-  // El id del archivo cambia con cada imagen nueva: sirve para invalidar la caché del navegador.
-  return t.preview?.imageFileId ? `/digital-templates/${t.slug}/image?v=${t.preview.imageFileId.toString()}` : null;
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
+function publicPreview(t: Doc<DigitalTemplate>) {
+  return {
+    title: t.preview?.title ?? null,
+    description: t.preview?.description ?? null,
+    domain: t.preview?.domain ?? null,
+    path: demoPathOf(t.demoUrl),
+    imagePath: assetPath(templateBase(t.slug), 'image', t.preview?.image),
+    /** upload = portada vertical subida desde el panel (va dentro del celular); og = imagen horizontal de la página. */
+    imageSource: t.preview?.image ? (t.preview.imageSource ?? 'og') : null,
+    faviconPath: assetPath(templateBase(t.slug), 'favicon', t.preview?.favicon),
+  };
 }
 
 function toPublic(t: Doc<DigitalTemplate>) {
   return {
     slug: t.slug,
-    kind: t.kind,
     name: t.name,
     description: t.description ?? t.preview?.description ?? null,
-    occasion: t.occasion,
     demoUrl: t.demoUrl,
-    domain: hostOf(t.demoUrl),
+    occasions: [...t.occasions],
+    fields: t.fields.map((f) => ({ key: f.key, required: f.required, max: f.max ?? null })),
     priceCents: t.priceCents,
-    customizableFields: [...t.customizableFields],
-    imagePath: imagePath(t),
-    previewTitle: t.preview?.title ?? null,
+    colors: { bg: t.colors.bg, accent: t.colors.accent, ink: t.colors.ink, stage: t.colors.stage },
     featured: t.featured,
+    preview: publicPreview(t),
   };
 }
 
 function toAdmin(t: Doc<DigitalTemplate>) {
+  // El panel ve también las imágenes de los borradores (rutas protegidas).
+  const base = `/admin/digital-templates/${t._id.toString()}/assets`;
   return {
     ...toPublic(t),
     id: t._id.toString(),
@@ -84,8 +64,9 @@ function toAdmin(t: Doc<DigitalTemplate>) {
     status: t.status,
     sortOrder: t.sortOrder,
     preview: {
-      title: t.preview?.title ?? null,
-      description: t.preview?.description ?? null,
+      ...publicPreview(t),
+      imagePath: assetPath(base, 'image', t.preview?.image),
+      faviconPath: assetPath(base, 'favicon', t.preview?.favicon),
       siteName: t.preview?.siteName ?? null,
       imageSource: t.preview?.imageSource ?? null,
       fetchedAt: t.preview?.fetchedAt ?? null,
@@ -95,222 +76,161 @@ function toAdmin(t: Doc<DigitalTemplate>) {
   };
 }
 
+export type AdminTemplate = ReturnType<typeof toAdmin>;
+
 /**
- * Catálogo de productos digitales: plantillas de detalles personalizables (invitaciones,
- * mensajes) y diseños de página de las tarjetas NFC. Cada plantilla muestra la vista previa
- * de su página de demostración y se pide con un formulario que llega como prospecto.
+ * Catálogo de detalles digitales: plantillas con su página de demostración (y la vista previa de su
+ * link) y las ocasiones con que se filtran. Solo se publican plantillas con demo.
  */
 @Injectable()
 export class DigitalService {
-  private readonly logger = new Logger(DigitalService.name);
-
   constructor(
-    @InjectConnection() private readonly connection: Connection,
     @InjectModel(DigitalTemplate.name) private readonly templates: Model<DigitalTemplate>,
-    private readonly leads: LeadsService,
+    @InjectModel(Occasion.name) private readonly occasions: Model<Occasion>,
+    private readonly images: ProductImagesService,
     private readonly audit: AuditService,
   ) {}
 
-  private get bucket() {
-    return new mongoose.mongo.GridFSBucket(this.connection.db!, { bucketName: 'digital_template_images' });
-  }
-
   // ------------------------------------------------------------------ público
 
-  async listPublic(kind?: DigitalKind) {
-    const filter: Record<string, unknown> = { status: 'active' };
-    if (kind) filter.kind = kind;
-    const items = await this.templates.find(filter).sort({ featured: -1, sortOrder: 1, name: 1 }).lean<Doc<DigitalTemplate>[]>();
+  async listPublic(occasion?: string) {
+    const filter: Record<string, unknown> = { status: 'published', demoUrl: trusted({ $ne: '' }) };
+    if (occasion) filter.occasions = occasion;
+    const items = await this.templates.find(filter).sort({ sortOrder: 1, name: 1 }).lean<Doc<DigitalTemplate>[]>();
     return { items: items.map(toPublic) };
   }
 
-  async getImage(slug: string): Promise<{ content: Buffer; contentType: string }> {
-    const template = await this.templates.findOne({ slug, status: 'active' }).lean<Doc<DigitalTemplate>>();
-    const fileId = template?.preview?.imageFileId;
-    if (!template || !fileId) throw new NotFoundException('Imagen no encontrada.');
-    const chunks: Buffer[] = [];
-    for await (const chunk of this.bucket.openDownloadStream(fileId)) chunks.push(chunk as Buffer);
-    return { content: Buffer.concat(chunks), contentType: template.preview.imageContentType ?? 'application/octet-stream' };
+  async listOccasions() {
+    const items = await this.occasions.find().sort({ sortOrder: 1, label: 1 }).lean<Doc<Occasion>[]>();
+    return { items: items.map((o) => ({ slug: o.slug, label: o.label })) };
   }
 
-  /** Pedido desde el sitio. Con el honeypot lleno se responde igual pero no se guarda nada. */
-  async createOrder(dto: CreateDigitalOrderDto, context: RequestContext): Promise<{ received: true; reference: string }> {
-    const template = await this.templates.findOne({ slug: dto.templateSlug, status: 'active' }).lean<Doc<DigitalTemplate>>();
-    if (!template) throw new NotFoundException('La plantilla ya no está disponible.');
-    if (dto.website && dto.website.trim().length > 0) {
-      this.logger.warn('Pedido digital descartado por honeypot.');
-      return { received: true, reference: 'RS-00000000' };
-    }
-    // Un detalle digital es una sola página; las tarjetas NFC se piden por cantidad.
-    const quantity = template.kind === 'nfc_card' ? (dto.quantity ?? 1) : 1;
-    const values = new Map((dto.fields ?? []).filter((f) => f.value.length > 0).map((f) => [f.label, f.value]));
-    // Solo se guardan los datos que la plantilla pide, en su orden.
-    const fields = template.customizableFields.flatMap((label) => (values.has(label) ? [{ label, value: values.get(label)! }] : []));
-
-    const price = template.priceCents === null ? 'Por cotizar' : `${formatMXN(template.priceCents)}${template.kind === 'nfc_card' ? ' por tarjeta' : ''}`;
-    const message = [
-      `${KIND_LABELS[template.kind]}: ${template.name}`,
-      `Demo: ${template.demoUrl}`,
-      ...(template.kind === 'nfc_card' ? [`Cantidad de tarjetas: ${quantity}`] : []),
-      `Precio publicado: ${price}`,
-      ...fields.map((f) => `${f.label}: ${f.value}`),
-      ...(dto.notes ? [`Notas: ${dto.notes}`] : []),
-    ].join('\n');
-
-    const { reference } = await this.leads.createFromDigitalOrder(
-      {
-        name: dto.name,
-        email: dto.email,
-        phone: dto.phone,
-        message: message.slice(0, 2000),
-        consentVersion: DIGITAL_ORDER_CONSENT_VERSION,
-        digitalOrder: {
-          kind: template.kind,
-          templateSlug: template.slug,
-          templateName: template.name,
-          demoUrl: template.demoUrl,
-          quantity,
-          unitPriceCents: template.priceCents,
-          fields,
-        },
-      },
-      context,
-    );
-    return { received: true, reference };
+  async getAsset(slug: string, asset: 'image' | 'favicon'): Promise<{ content: Buffer; contentType: string }> {
+    const template = await this.templates.findOne({ slug, status: 'published' }).lean<Doc<DigitalTemplate>>();
+    const stored = asset === 'image' ? template?.preview?.image : template?.preview?.favicon;
+    if (!stored) throw new NotFoundException('Imagen no encontrada.');
+    return { content: await this.images.read(stored.fileId), contentType: stored.contentType };
   }
 
-  // ------------------------------------------------------------------ administración
+  // ------------------------------------------------------------------ plantillas (panel)
 
-  async listAdmin(query: TemplateListQuery): Promise<Paged<ReturnType<typeof toAdmin>>> {
-    const { page, pageSize, skip } = pageOf(query);
+  async getAdminAsset(id: string, asset: 'image' | 'favicon') {
+    const template = await this.findById(id);
+    const stored = asset === 'image' ? template.preview?.image : template.preview?.favicon;
+    if (!stored) throw new NotFoundException('Imagen no encontrada.');
+    return { content: await this.images.read(stored.fileId), contentType: stored.contentType };
+  }
+
+  async listAdmin(query: ProductListQuery): Promise<Paged<AdminTemplate> & { counts: { all: number; published: number; draft: number } }> {
+    const { page, pageSize, skip } = pageOf({ ...query, pageSize: query.pageSize ?? 100 });
     const filter: Record<string, unknown> = {};
-    if (query.kind) filter.kind = query.kind;
     if (query.status) filter.status = query.status;
     if (query.q) filter.$or = [{ name: containsText(query.q) }, { slug: containsText(query.q) }, { demoUrl: containsText(query.q) }];
-    const [items, total] = await Promise.all([
-      this.templates.find(filter).sort({ kind: 1, featured: -1, sortOrder: 1, name: 1 }).skip(skip).limit(pageSize).lean<Doc<DigitalTemplate>[]>(),
+    const [items, total, published, draft] = await Promise.all([
+      this.templates.find(filter).sort({ sortOrder: 1, name: 1 }).skip(skip).limit(pageSize).lean<Doc<DigitalTemplate>[]>(),
       this.templates.countDocuments(filter),
+      this.templates.countDocuments({ status: 'published' }),
+      this.templates.countDocuments({ status: 'draft' }),
     ]);
-    return { page, pageSize, total, items: items.map(toAdmin) };
+    return { page, pageSize, total, items: items.map(toAdmin), counts: { all: published + draft, published, draft } };
   }
 
   async create(user: AuthenticatedUser, dto: CreateTemplateDto) {
-    assertOccasion(dto.kind, dto.occasion);
     const slug = dto.slug ?? (await this.freeSlug(slugify(dto.name)));
     if (await this.templates.exists({ slug })) throw new ConflictException('Ya existe una plantilla con ese identificador.');
+    const demoUrl = dto.demoUrl ?? '';
+    const status = dto.status ?? 'draft';
+    assertPublishable(status, demoUrl);
+    await this.assertOccasions(dto.occasions);
+    const last = await this.templates.findOne().sort({ sortOrder: -1 }).select({ sortOrder: 1 }).lean<{ sortOrder: number }>();
     const created = await this.templates.create({
       slug,
-      kind: dto.kind,
       name: dto.name,
       description: dto.description,
-      occasion: dto.occasion,
-      demoUrl: dto.demoUrl,
+      demoUrl,
+      occasions: dto.occasions ?? [],
+      fields: dto.fields ?? [],
       priceCents: dto.priceCents ?? null,
-      customizableFields: dto.customizableFields ?? [],
-      status: dto.status ?? 'active',
-      featured: dto.featured ?? false,
-      sortOrder: dto.sortOrder ?? 0,
+      ...(dto.colors ? { colors: dto.colors } : {}),
+      status,
+      featured: false,
+      sortOrder: dto.sortOrder ?? (last?.sortOrder ?? 0) + 10,
     });
+    if (dto.featured) await this.setFeatured(created._id);
     await this.audit.record({
       action: 'digital_template.created',
       entityType: 'digital_template',
       entityId: created._id,
       actor: actorOf(user),
-      after: { slug, kind: dto.kind, name: dto.name, demoUrl: dto.demoUrl, priceCents: created.priceCents },
+      after: { slug, name: dto.name, demoUrl, priceCents: created.priceCents, status },
     });
     return this.refreshPreview(created._id);
   }
 
   async update(user: AuthenticatedUser, id: string, dto: UpdateTemplateDto) {
     const before = await this.findById(id);
-    const kind = dto.kind ?? before.kind;
-    const occasion = dto.occasion ?? before.occasion;
-    assertOccasion(kind, occasion);
     const set: Record<string, unknown> = {};
-    for (const key of ['kind', 'name', 'description', 'occasion', 'demoUrl', 'priceCents', 'customizableFields', 'status', 'featured', 'sortOrder'] as const) {
+    for (const key of ['name', 'description', 'demoUrl', 'priceCents', 'occasions', 'fields', 'colors', 'status', 'sortOrder'] as const) {
       if (dto[key] !== undefined) set[key] = dto[key];
     }
-    if (Object.keys(set).length === 0) throw new BadRequestException('No hay cambios que aplicar.');
-    await this.templates.updateOne({ _id: before._id }, { $set: set });
+    if (Object.keys(set).length === 0 && dto.featured === undefined) throw new BadRequestException('No hay cambios que aplicar.');
+    assertPublishable((dto.status ?? before.status), dto.demoUrl ?? before.demoUrl);
+    await this.assertOccasions(dto.occasions);
+    if (Object.keys(set).length > 0) await this.templates.updateOne({ _id: before._id }, { $set: set });
+    if (dto.featured === true) await this.setFeatured(before._id);
+    if (dto.featured === false) await this.templates.updateOne({ _id: before._id }, { $set: { featured: false } });
     await this.audit.record({
       action: 'digital_template.updated',
       entityType: 'digital_template',
       entityId: before._id,
       actor: actorOf(user),
       before: Object.fromEntries(Object.keys(set).map((k) => [k, before[k as keyof DigitalTemplate]])),
-      after: set,
+      after: { ...set, ...(dto.featured !== undefined ? { featured: dto.featured } : {}) },
     });
-    // Otra demo: se vuelve a leer su vista previa (la captura subida se conserva).
+    // Otra demo: se vuelve a leer su vista previa (la portada subida se conserva).
     if (dto.demoUrl !== undefined && dto.demoUrl !== before.demoUrl) return this.refreshPreview(before._id);
     return toAdmin(await this.findById(id));
   }
 
-  /** Vuelve a leer la vista previa de la demo. Si la lectura falla, se guarda el motivo y la plantilla sigue publicada. */
+  /** Vuelve a leer la vista previa de la demo. Si falla, se guarda el motivo y la plantilla sigue igual. */
   async refreshPreview(id: Types.ObjectId | string) {
     const template = await this.findById(id);
-    const set: Record<string, unknown> = { 'preview.fetchedAt': new Date() };
-    const unset: Record<string, 1> = {};
-    try {
-      const meta = await fetchPreviewMeta(template.demoUrl);
-      Object.assign(set, { 'preview.title': meta.title, 'preview.description': meta.description, 'preview.siteName': meta.siteName });
-      for (const key of ['title', 'description', 'siteName'] as const) if (!meta[key]) unset[`preview.${key}`] = 1;
-      unset['preview.error'] = 1;
-      // Una captura subida desde el panel tiene prioridad sobre la imagen de la página.
-      if (template.preview?.imageSource !== 'upload') {
-        if (meta.imageUrl) {
-          const image = await downloadPreviewImage(meta.imageUrl).catch((error: unknown) => {
-            set['preview.error'] = `Imagen: ${messageOf(error)}`;
-            delete unset['preview.error'];
-            return null;
-          });
-          if (image) await this.replaceImage(template, image.content, image.contentType, 'og', set);
-        } else {
-          set['preview.error'] = 'La página no declara una imagen de vista previa: sube una captura.';
-          delete unset['preview.error'];
-        }
-      }
-    } catch (error) {
-      set['preview.error'] = messageOf(error);
-      this.logger.warn(`Vista previa de ${template.slug}: ${messageOf(error)}`);
-    }
-    const updated = await this.templates
-      .findByIdAndUpdate(template._id, { $set: set, ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}) }, { returnDocument: 'after' })
-      .lean<Doc<DigitalTemplate>>();
+    const { preview, obsolete } = await this.images.readPreview(template.demoUrl, template.preview, template.slug);
+    const updated = await this.templates.findByIdAndUpdate(template._id, { $set: { preview } }, { returnDocument: 'after' }).lean<Doc<DigitalTemplate>>();
+    await this.images.remove(obsolete);
     return toAdmin(updated!);
   }
 
-  async uploadImage(user: AuthenticatedUser, id: string, file: UploadedImage | undefined) {
-    if (!file) throw new BadRequestException('Adjunta una imagen.');
-    if (file.size > MAX_IMAGE_BYTES) throw new BadRequestException('La imagen no debe pasar de 3 MB.');
-    const contentType = sniffImageType(file.buffer);
-    if (!contentType || !IMAGE_TYPES.includes(contentType)) throw new BadRequestException('La imagen debe ser PNG, JPEG, WebP o GIF.');
+  /** Sube una portada: reemplaza a la imagen de la página en la vista previa. */
+  async uploadCover(user: AuthenticatedUser, id: string, file: UploadedImage | undefined) {
     const template = await this.findById(id);
-    const set: Record<string, unknown> = {};
-    await this.replaceImage(template, file.buffer, contentType, 'upload', set);
+    const image = await this.images.storeUpload(file, `${template.slug}-cover`);
     const updated = await this.templates
-      .findByIdAndUpdate(template._id, { $set: set, $unset: { 'preview.error': 1 } }, { returnDocument: 'after' })
+      .findByIdAndUpdate(
+        template._id,
+        { $set: { 'preview.image': image, 'preview.imageSource': 'upload' }, $unset: { 'preview.error': 1 } },
+        { returnDocument: 'after' },
+      )
       .lean<Doc<DigitalTemplate>>();
-    await this.audit.record({ action: 'digital_template.image_uploaded', entityType: 'digital_template', entityId: template._id, actor: actorOf(user) });
+    await this.images.remove([template.preview?.image?.fileId]);
+    await this.audit.record({ action: 'digital_template.cover_uploaded', entityType: 'digital_template', entityId: template._id, actor: actorOf(user) });
     return toAdmin(updated!);
   }
 
-  /** Quita la captura subida y vuelve a la imagen de la página. */
-  async removeUploadedImage(user: AuthenticatedUser, id: string) {
+  /** Quita la portada subida y vuelve a la imagen de la página. */
+  async removeCover(user: AuthenticatedUser, id: string) {
     const template = await this.findById(id);
-    if (template.preview?.imageSource !== 'upload') throw new BadRequestException('La plantilla no tiene una captura subida.');
-    await this.deleteFile(template.preview.imageFileId);
-    await this.templates.updateOne(
-      { _id: template._id },
-      { $unset: { 'preview.imageFileId': 1, 'preview.imageContentType': 1, 'preview.imageSource': 1 } },
-    );
-    await this.audit.record({ action: 'digital_template.image_removed', entityType: 'digital_template', entityId: template._id, actor: actorOf(user) });
+    if (template.preview?.imageSource !== 'upload') throw new BadRequestException('La plantilla no tiene una portada subida.');
+    await this.templates.updateOne({ _id: template._id }, { $unset: { 'preview.image': 1, 'preview.imageSource': 1 } });
+    await this.images.remove([template.preview.image?.fileId]);
+    await this.audit.record({ action: 'digital_template.cover_removed', entityType: 'digital_template', entityId: template._id, actor: actorOf(user) });
     return this.refreshPreview(template._id);
   }
 
   async remove(user: AuthenticatedUser, id: string): Promise<void> {
     const template = await this.findById(id);
     await this.templates.deleteOne({ _id: template._id });
-    await this.deleteFile(template.preview?.imageFileId);
+    await this.images.remove([template.preview?.image?.fileId, template.preview?.favicon?.fileId]);
     await this.audit.record({
       action: 'digital_template.deleted',
       entityType: 'digital_template',
@@ -320,13 +240,72 @@ export class DigitalService {
     });
   }
 
+  // ------------------------------------------------------------------ ocasiones (panel)
+
+  async createOccasion(user: AuthenticatedUser, dto: CreateOccasionDto) {
+    const slug = dto.slug ?? slugify(dto.label, 'ocasion');
+    if (await this.occasions.exists({ slug })) throw new ConflictException('Ya existe una ocasión con ese identificador.');
+    const last = await this.occasions.findOne().sort({ sortOrder: -1 }).select({ sortOrder: 1 }).lean<{ sortOrder: number }>();
+    const created = await this.occasions.create({ slug, label: dto.label, sortOrder: dto.sortOrder ?? (last?.sortOrder ?? 0) + 10 });
+    await this.audit.record({ action: 'digital_occasion.created', entityType: 'digital_occasion', entityId: created._id, actor: actorOf(user), after: { slug, label: dto.label } });
+    return this.listOccasions();
+  }
+
+  async updateOccasion(user: AuthenticatedUser, id: string, dto: UpdateOccasionDto) {
+    const occasion = await this.occasionById(id);
+    const set = Object.fromEntries(Object.entries(dto).filter(([, v]) => v !== undefined));
+    if (Object.keys(set).length === 0) throw new BadRequestException('No hay cambios que aplicar.');
+    await this.occasions.updateOne({ _id: occasion._id }, { $set: set });
+    await this.audit.record({ action: 'digital_occasion.updated', entityType: 'digital_occasion', entityId: occasion._id, actor: actorOf(user), after: set });
+    return this.listOccasions();
+  }
+
+  /** Borra la ocasión y la quita de las plantillas que la usaban. */
+  async removeOccasion(user: AuthenticatedUser, id: string) {
+    const occasion = await this.occasionById(id);
+    await this.occasions.deleteOne({ _id: occasion._id });
+    await this.templates.updateMany({ occasions: occasion.slug }, { $pull: { occasions: occasion.slug } });
+    await this.audit.record({ action: 'digital_occasion.deleted', entityType: 'digital_occasion', entityId: occasion._id, actor: actorOf(user), before: { slug: occasion.slug } });
+    return this.listOccasions();
+  }
+
+  async listOccasionsAdmin() {
+    const items = await this.occasions.find().sort({ sortOrder: 1, label: 1 }).lean<Doc<Occasion>[]>();
+    return { items: items.map((o) => ({ id: o._id.toString(), slug: o.slug, label: o.label, sortOrder: o.sortOrder })) };
+  }
+
   // ------------------------------------------------------------------ apoyo
+
+  /** Plantilla publicada para un pedido. */
+  async findPublished(slug: string): Promise<Doc<DigitalTemplate>> {
+    const template = await this.templates.findOne({ slug, status: 'published', demoUrl: trusted({ $ne: '' }) }).lean<Doc<DigitalTemplate>>();
+    if (!template) throw new NotFoundException('La plantilla ya no está disponible.');
+    return template;
+  }
 
   private async findById(id: Types.ObjectId | string): Promise<Doc<DigitalTemplate>> {
     if (!Types.ObjectId.isValid(id)) throw new NotFoundException('Plantilla no encontrada.');
     const template = await this.templates.findById(id).lean<Doc<DigitalTemplate>>();
     if (!template) throw new NotFoundException('Plantilla no encontrada.');
     return template;
+  }
+
+  private async occasionById(id: string): Promise<Doc<Occasion>> {
+    const occasion = Types.ObjectId.isValid(id) ? await this.occasions.findById(id).lean<Doc<Occasion>>() : null;
+    if (!occasion) throw new NotFoundException('Ocasión no encontrada.');
+    return occasion;
+  }
+
+  private async assertOccasions(slugs: string[] | undefined) {
+    if (!slugs || slugs.length === 0) return;
+    const found = await this.occasions.countDocuments({ slug: inValues(slugs) });
+    if (found !== slugs.length) throw new BadRequestException('Alguna ocasión no existe.');
+  }
+
+  /** Solo una plantilla destacada (la que abre «Ver una demo» del inicio). */
+  private async setFeatured(id: Types.ObjectId) {
+    await this.templates.updateMany({ _id: trusted({ $ne: id }), featured: true }, { $set: { featured: false } });
+    await this.templates.updateOne({ _id: id }, { $set: { featured: true } });
   }
 
   private async freeSlug(base: string): Promise<string> {
@@ -336,28 +315,9 @@ export class DigitalService {
     }
     throw new ConflictException('No se pudo generar un identificador libre; indica uno.');
   }
-
-  /** Guarda la imagen nueva, borra la anterior y deja en `set` los campos a actualizar. */
-  private async replaceImage(template: Doc<DigitalTemplate>, content: Buffer, contentType: string, source: 'og' | 'upload', set: Record<string, unknown>) {
-    const fileId = await new Promise<Types.ObjectId>((resolve, reject) => {
-      const stream = this.bucket.openUploadStream(`${template.slug}-${source}`, { metadata: { template: template._id, source, contentType } });
-      stream.once('finish', () => resolve(stream.id));
-      stream.once('error', reject);
-      stream.end(content);
-    });
-    await this.deleteFile(template.preview?.imageFileId);
-    Object.assign(set, { 'preview.imageFileId': fileId, 'preview.imageContentType': contentType, 'preview.imageSource': source });
-  }
-
-  private async deleteFile(fileId: Types.ObjectId | undefined) {
-    if (fileId) await this.bucket.delete(fileId).catch(() => undefined);
-  }
 }
 
-function assertOccasion(kind: DigitalKind, occasion: string) {
-  if (!OCCASIONS_BY_KIND[kind].includes(occasion)) throw new BadRequestException('La ocasión no corresponde al tipo de producto.');
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof LinkPreviewError ? error.message : 'No se pudo leer la vista previa.';
+/** No se publica nada sin página de demostración. */
+export function assertPublishable(status: string, demoUrl: string) {
+  if (status === 'published' && !demoUrl) throw new BadRequestException('Agrega la URL de la demo antes de publicar.');
 }
